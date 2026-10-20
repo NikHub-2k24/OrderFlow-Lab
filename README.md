@@ -64,7 +64,7 @@ To isolate the economic impact of order-flow clustering without distorting aggre
 
 OrderFlow Lab sets the Poisson baseline's constant arrival rate per side to:
 
-$$\lambda_{\text{Poisson, matched}} = \frac{\mathbb{E}[N(T)]}{T} = \frac{\mu}{1 - \eta} - \frac{\mu \eta}{1 - \eta} \left(\frac{1 - e^{-\gamma T}}{\gamma T}\right)$$
+$$\lambda_{\text{matched}} = \frac{\mathbb{E}[N(T)]}{T} = \frac{\mu}{1 - \eta} - \frac{\mu \eta}{1 - \eta} \left(\frac{1 - e^{-\gamma T}}{\gamma T}\right)$$
 
 For typical parameters ($\mu=20, \alpha_{\text{self}}=5, \alpha_{\text{cross}}=5, \beta=20, T=1.0$), $\lambda_\infty = 40.0$, but $\lambda_{\text{matched}} = 38.0$ events/side. Using the stationary rate over a finite horizon would artificially inflate the Poisson comparator by ~5% more volume, confounding arrival clustering with volume bias.
 
@@ -84,7 +84,8 @@ The reference mid-price starts at initial value $S_0 > 0$ (default \$100.00). Ov
    where $\sigma$ is log-price volatility per square-root session.
 
 2. **Order-Flow Price Impact:** At each event $t_i$, market orders induce an exogenous permanent signed log-price jump:
-   $$\ln S(t_i) = \ln S(t_i^-) + \text{sign}_i \times \frac{\text{impact\_bps}}{10\,000}, \quad \text{sign}_i \in \{+1, -1\}$$
+   $$\ln S(t_i) = \ln S(t_i^-) + \text{sign}_i \times \frac{I_{\text{bps}}}{10\,000}, \quad \text{sign}_i \in \{+1, -1\}$$
+   where $I_{\text{bps}}$ represents the permanent price impact parameter `impact_bps` in basis points.
 
 The reference mid-price path is independent of whether the simulated dealer fills. This isolates an invariant benchmark path upon which both quoting policies can be compared.
 
@@ -92,7 +93,7 @@ The reference mid-price path is independent of whether the simulated dealer fill
 
 ### 2.3 Market-Making Policies
 
-Both policies share the same hard inventory limit $Q_{\max} \ge 1$, base half-spread $\delta_{\text{base}} > 0$, transaction fee schedule $\text{fee\_bps} \ge 0$, and conditional fill probability model:
+Both policies share the same hard inventory limit $Q_{\max} \ge 1$, base half-spread $\delta_{\text{base}} > 0$, transaction fee schedule `fee_bps` $\ge 0$, and conditional fill probability model:
 
 $$p_{\text{fill}} = \min\left(1.0, \, p_0 \, e^{-\kappa \, d_{\text{bps}}}\right)$$
 
@@ -105,26 +106,26 @@ where $d_{\text{bps}}$ is the quoted distance from current mid-price in basis po
 - When $q = -Q_{\max}$, asks are disabled ($p_{\text{fill, ask}} = 0$).
 
 #### Policy B: Inventory-Aware Quoting
-- Calculates quote skew proportional to current signed inventory $q$:
-  $$\text{skew\_bps} = \text{clip}\left(c \cdot q, \, -0.8 \delta_{\text{base}}, \, +0.8 \delta_{\text{base}}\right)$$
+- Calculates quote skew $s_{\text{bps}}$ proportional to current signed inventory $q$:
+  $$s_{\text{bps}} = \text{clip}\left(c \cdot q, \, -0.8 \, \delta_{\text{base}}, \, +0.8 \, \delta_{\text{base}}\right)$$
 - Distances from mid:
-  $$d_{\text{bid}} = \delta_{\text{base}} + \text{skew\_bps}$$
-  $$d_{\text{ask}} = \delta_{\text{base}} - \text{skew\_bps}$$
-- When dealer is net long ($q > 0$): $\text{skew} > 0 \implies$ bid moves farther from mid (lowering bid fill rate), ask moves closer to mid (raising ask fill rate and accelerating inventory shedding).
-- When dealer is net short ($q < 0$): $\text{skew} < 0 \implies$ bid moves closer to mid, ask moves farther.
-- Both distances remain strictly positive ($\ge 0.2 \delta_{\text{base}} > 0$).
+  $$d_{\text{bid}} = \delta_{\text{base}} + s_{\text{bps}}$$
+  $$d_{\text{ask}} = \delta_{\text{base}} - s_{\text{bps}}$$
+- When dealer is net long ($q > 0$): $s_{\text{bps}} > 0 \implies$ bid moves farther from mid (lowering bid fill rate), ask moves closer to mid (raising ask fill rate and accelerating inventory shedding).
+- When dealer is net short ($q < 0$): $s_{\text{bps}} < 0 \implies$ bid moves closer to mid, ask moves farther.
+- Both distances remain strictly positive ($\ge 0.2 \, \delta_{\text{base}} > 0$).
 - Enforces the identical hard inventory boundary $q \in [-Q_{\max}, +Q_{\max}]$.
 
 ### 2.4 Accounting, Liquidation, & Formal Metric Definitions
 
 #### Intra-Session Cash & Inventory Updates
-Intra-session trades update cash by execution price minus transaction fees ($P \times \text{fee\_bps} / 10^4$). Inventory is marked to market at the post-impact mid-price.
+Intra-session trades update cash by execution price minus transaction fees ($P \times \text{fee} / 10^4$, where fee is `fee_bps`). Inventory is marked to market at the post-impact mid-price.
 
 #### Conservative Terminal Liquidation
 At session end ($t = T$), residual inventory $q_T \ne 0$ is liquidated by crossing the base half-spread and paying liquidation fees:
 - If $q_T > 0$ (long): sell $q_T$ at $P_{\text{liq}} = S_T \exp(-\delta_{\text{base}} / 10^4)$.
 - If $q_T < 0$ (short): buy back $|q_T|$ at $P_{\text{liq}} = S_T \exp(+\delta_{\text{base}} / 10^4)$.
-- Liquidation fee: $|q_T| \times P_{\text{liq}} \times (\text{fee\_bps} / 10^4)$.
+- Liquidation fee: $|q_T| \times P_{\text{liq}} \times (\text{fee} / 10^4)$ using `fee_bps`.
 
 **Accounting Identity:**
 $$\text{Net Terminal P\&L} = \text{MTM Terminal Equity} - \text{Spread-Crossing Penalty} - \text{Liquidation Fee}$$
@@ -144,7 +145,7 @@ Because the liquidation penalty is strictly non-negative, **net terminal P&L nev
    This is explicitly an *event-time-sampled* estimate rather than a continuous-time supremum.
 4. **Log Price Return (`log_price_return_bps`):**
    The continuously compounded return of the reference mid-price in basis points:
-   $$\text{log\_price\_return\_bps} = 10\,000 \times \ln\left(\frac{S_T}{S_0}\right)$$
+   $$r_{\text{log}} = 10\,000 \times \ln\left(\frac{S_T}{S_0}\right) \quad (\text{bps})$$
 
 ---
 
@@ -185,7 +186,7 @@ All empirical interpretations in OrderFlow Lab are generated dynamically from co
 2. **Inventory Skew as Risk Mitigation:**
    Across paired Monte Carlo runs, Policy B's inventory-dependent quoting dampens extreme inventory build-up. The reduction in time-average inventory ($\bar{q}_{\text{time}}$) and peak inventory is supported by paired $t$-tests and Wilcoxon signed-rank tests when adverse-selection price impact is non-zero.
 3. **The Adverse-Selection Trade-Off:**
-   In regimes where price impact is absent ($\text{impact\_bps} = 0$), inventory skewing sacrifices spread capture without mitigating adverse selection. The application's sensitivity sweep quantitatively demonstrates that inventory awareness is an adverse-selection defense mechanism rather than an unconditional spread maximizer.
+   In regimes where price impact is absent (`impact_bps = 0`), inventory skewing sacrifices spread capture without mitigating adverse selection. The application's sensitivity sweep quantitatively demonstrates that inventory awareness is an adverse-selection defense mechanism rather than an unconditional spread maximizer.
 
 ---
 
@@ -193,7 +194,7 @@ All empirical interpretations in OrderFlow Lab are generated dynamically from co
 
 The central hypothesis—that *inventory-aware quoting provides superior risk-adjusted outcomes and tail-risk protection in the presence of order-flow clustering and adverse selection*—would be **falsified** if:
 
-1. **Zero-Impact Spread Loss:** Under empirical regimes where market orders carry negligible permanent price impact ($\text{impact\_bps} \to 0$), Policy B exhibits a statistically significant negative mean difference ($\mathbb{E}[\Delta \text{P\&L}] < 0$) due to forgone spread capture and higher relative fee drag.
+1. **Zero-Impact Spread Loss:** Under empirical regimes where market orders carry negligible permanent price impact (`impact_bps` $\to 0$), Policy B exhibits a statistically significant negative mean difference ($\mathbb{E}[\Delta \text{P\&L}] < 0$) due to forgone spread capture and higher relative fee drag.
 2. **Directional Saturation Failure:** Under strong deterministic drift where order flow is entirely one-sided, inventory-aware skew fails to prevent inventory saturation if opposite-side flow ceases entirely, causing Policy B to incur identical boundary penalties as Policy A.
 3. **Queue Degradation Under FIFO:** In an explicit FIFO queue simulator, quote requoting cancels priority, causing the fill penalty from moving quotes to exceed the inventory benefit.
 
@@ -279,13 +280,13 @@ while holding branching ratio constant will increase dealer inventory utilizatio
 - Sample Size: N = [ ] sessions | Seed = [ ]
 
 ### 3. Empirical Results
-- Policy A Mean Net P&L: $ [ ] (95% CI: [$ , $ ])
-- Policy B Mean Net P&L: $ [ ] (95% CI: [$ , $ ])
-- Paired Mean Difference (B - A): $ [ ] (95% CI: [$ , $ ])
+- Policy A Mean Net P&L: \$[ ] (95% CI: [\$[ ], \$[ ]])
+- Policy B Mean Net P&L: \$[ ] (95% CI: [\$[ ], \$[ ]])
+- Paired Mean Difference (B - A): \$[ ] (95% CI: [\$[ ], \$[ ]])
 - Policy B Win Rate: [ ] %
 - Paired Student's t: t = [ ], p-value = [ ]
-- Policy A 5% CVaR: $ [ ] vs Policy B 5% CVaR: $ [ ]
-- Policy A Mean Max Inventory: [ ] vs Policy B: [ ]
+- Policy A 5% CVaR: \$[ ] vs Policy B 5% CVaR: \$[ ]
+- Policy A Mean Max Inventory: [ ] units vs Policy B: [ ] units
 
 ### 4. Robustness & Sensitivity Checks
 Describe outcome stability across varying random seeds, sample sizes, and adjacent parameter slices.
