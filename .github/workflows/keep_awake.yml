@@ -24,14 +24,14 @@ jobs:
 
       - name: Ping Streamlit App with Playwright
         env:
-          STREAMLIT_APP_URL: ${{ vars.STREAMLIT_APP_URL || secrets.STREAMLIT_APP_URL || 'https://orderflow-lab.streamlit.app' }}
+          STREAMLIT_APP_URL: ${{ vars.STREAMLIT_APP_URL || secrets.STREAMLIT_APP_URL || 'https://orderflow-lab-by-nikhil.streamlit.app/' }}
         run: |
           python << 'EOF'
           import os
           import time
           from playwright.sync_api import sync_playwright
 
-          app_url = os.environ.get("STREAMLIT_APP_URL", "https://orderflow-lab.streamlit.app")
+          app_url = os.environ.get("STREAMLIT_APP_URL", "https://orderflow-lab-by-nikhil.streamlit.app/")
           print(f"Target URL: {app_url}")
 
           with sync_playwright() as p:
@@ -48,7 +48,7 @@ jobs:
                   # Brief pause to allow Streamlit client state to render
                   time.sleep(5)
 
-                  wake_button = page.locator("button:has-text('Yes, get this app back up!')")
+                  wake_button = page.locator("button:has-text('get this app back up'), button:has-text('Yes, get this app back up!')")
 
                   if wake_button.count() > 0 and wake_button.first.is_visible():
                       print("Detected sleeping Streamlit app. Clicking 'Yes, get this app back up!'...")

@@ -1,5 +1,7 @@
 # OrderFlow Lab: Hawkes Dynamics and Inventory-Aware Market Making
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://orderflow-lab-by-nikhil.streamlit.app/)
+
 A quantitative simulation and experimentation platform comparing symmetric and inventory-aware market-making policies under endogenous order-flow clustering and stylized price impact.
 
 ---
