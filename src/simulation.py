@@ -210,6 +210,14 @@ def run_policy_on_path(
     max_mdd = float(np.max(drawdowns)) if len(drawdowns) > 0 else 0.0
     inv_util = float(max_abs_inv) / float(max_inv) if max_inv > 0 else 0.0
 
+    # Calculate time-average absolute inventory: integral(|q(t)| dt) / T
+    total_t = float(price_path.timestamps[-1] - price_path.timestamps[0])
+    if total_t > 0:
+        dt_intervals = np.maximum(np.diff(price_path.timestamps), 0.0)
+        time_avg_abs_inv = float(np.sum(np.abs(inv_arr[:-1]) * dt_intervals) / total_t)
+    else:
+        time_avg_abs_inv = 0.0
+
     metrics = SessionMetrics(
         net_terminal_pnl=net_pnl,
         mtm_terminal_pnl=mtm_terminal_pnl,
@@ -224,7 +232,9 @@ def run_policy_on_path(
         traded_notional=traded_notional,
         terminal_inventory=current_inv,
         max_abs_inventory=max_abs_inv,
+        time_average_abs_inventory=time_avg_abs_inv,
         inventory_utilization=inv_util,
+        event_sampled_max_drawdown=max_mdd,
         max_drawdown=max_mdd,
         is_loss=(net_pnl < 0.0),
     )

@@ -14,17 +14,19 @@ from src.simulation import PairedSessionResult
 from src.experiments import MonteCarloResults
 
 
-# Palette definitions (restrained institutional navy/slate/neutral)
-COLOR_MID = "#0f172a"          # Slate 900
-COLOR_POLICY_A = "#475569"     # Slate 600
-COLOR_POLICY_B = "#1d4ed8"     # Blue 700
-COLOR_BUY = "#15803d"          # Emerald 700
-COLOR_SELL = "#b91c1c"         # Red 700
-COLOR_BG = "#ffffff"
-COLOR_PLOT_BG = "#f8fafc"      # Slate 50
-COLOR_GRID = "#e2e8f0"         # Slate 200
-COLOR_TEXT = "#1e293b"         # Slate 800
-COLOR_MUTED = "#64748b"        # Slate 500
+# Restrained institutional dark palette
+COLOR_BG = "#111418"          # Deep charcoal main background
+COLOR_PLOT_BG = "#191F26"     # Slate surface
+COLOR_PANEL_BG = "#202830"    # Elevated panel surface
+COLOR_GRID = "#303943"        # Subtle border / gridline
+COLOR_TEXT = "#E5E9ED"        # Primary text (soft off-white)
+COLOR_MUTED = "#A6B0BB"       # Secondary / muted text (light slate)
+
+COLOR_MID = "#E5E9ED"         # Reference Mid-Price
+COLOR_POLICY_A = "#8899A6"    # Policy A: Symmetric (neutral slate gray)
+COLOR_POLICY_B = "#70AFA7"    # Policy B: Inventory-Aware (primary accent muted teal)
+COLOR_BUY = "#69B68A"         # Dealer Bought (soft emerald green)
+COLOR_SELL = "#D77979"        # Dealer Sold (soft coral red)
 
 
 def apply_institutional_layout(
@@ -33,11 +35,11 @@ def apply_institutional_layout(
     height: int = 420,
     show_legend: bool = True,
 ) -> go.Figure:
-    """Apply consistent institutional research typography and theme to Plotly figures."""
+    """Apply consistent institutional research typography and dark theme to Plotly figures."""
     fig.update_layout(
         title=dict(
             text=title or "",
-            font=dict(size=14, color=COLOR_TEXT, family="Inter, system-ui, sans-serif"),
+            font=dict(size=13, color=COLOR_TEXT, family="Inter, system-ui, sans-serif"),
             x=0.01,
             xanchor="left",
             y=0.98,
@@ -54,8 +56,10 @@ def apply_institutional_layout(
             y=1.02,
             xanchor="right",
             x=1.0,
-            font=dict(size=10),
-            bgcolor="rgba(255, 255, 255, 0.7)",
+            font=dict(size=10, color=COLOR_TEXT),
+            bgcolor="rgba(25, 31, 38, 0.85)",
+            bordercolor=COLOR_GRID,
+            borderwidth=1,
         ),
         xaxis=dict(
             showgrid=True,
@@ -63,6 +67,7 @@ def apply_institutional_layout(
             zeroline=False,
             linecolor=COLOR_GRID,
             tickfont=dict(size=10, color=COLOR_MUTED),
+            title_font=dict(size=10, color=COLOR_MUTED),
         ),
         yaxis=dict(
             showgrid=True,
@@ -70,6 +75,7 @@ def apply_institutional_layout(
             zeroline=False,
             linecolor=COLOR_GRID,
             tickfont=dict(size=10, color=COLOR_MUTED),
+            title_font=dict(size=10, color=COLOR_MUTED),
         ),
     )
     return fig
@@ -343,22 +349,24 @@ def plot_paired_differences(mc_results: MonteCarloResults) -> go.Figure:
     )
 
     # Add vertical reference lines
-    fig.add_vline(x=0.0, line=dict(color=COLOR_SELL, width=1.5, dash="dash"), annotation_text="Parity (0.0)")
+    fig.add_vline(x=0.0, line=dict(color=COLOR_SELL, width=1.5, dash="dash"), annotation_text="Parity (0.0)", annotation_font_color=COLOR_MUTED)
     fig.add_vline(
         x=ps.mean_diff,
-        line=dict(color=COLOR_MID, width=2.0),
+        line=dict(color=COLOR_TEXT, width=2.0),
         annotation_text=f"Mean Diff: ${ps.mean_diff:.2f}",
         annotation_position="top left",
+        annotation_font_color=COLOR_TEXT,
     )
 
     # Confidence interval shaded band
     fig.add_vrect(
         x0=ps.ci_lower,
         x1=ps.ci_upper,
-        fillcolor="rgba(37, 99, 235, 0.12)",
+        fillcolor="rgba(112, 175, 167, 0.18)",
         line_width=0,
         annotation_text=f"95% Bootstrap CI: [${ps.ci_lower:.2f}, ${ps.ci_upper:.2f}]",
         annotation_position="bottom right",
+        annotation_font_color=COLOR_MUTED,
     )
 
     fig.update_layout(
@@ -379,16 +387,22 @@ def plot_tail_risk_metrics_bar(mc_results: MonteCarloResults) -> go.Figure:
     sb = mc_results.stats_b
 
     categories = [
-        "Mean P&L ($)",
-        "Median P&L ($)",
+        "Mean Net P&L ($)",
+        "Median Net P&L ($)",
         "5th Pct VaR ($)",
         "Worst 5% CVaR ($)",
-        "Mean Max Drawdown ($)",
-        "95th Pct Drawdown ($)",
+        "Mean Event-Sampled MDD ($)",
+        "95th Pct Event-Sampled MDD ($)",
     ]
 
-    vals_a = [sa.mean_pnl, sa.median_pnl, sa.pnl_5th_pct, sa.cvar_5th, sa.mean_drawdown, sa.drawdown_95th]
-    vals_b = [sb.mean_pnl, sb.median_pnl, sb.pnl_5th_pct, sb.cvar_5th, sb.mean_drawdown, sb.drawdown_95th]
+    vals_a = [
+        sa.mean_pnl, sa.median_pnl, sa.pnl_5th_pct, sa.cvar_5th,
+        sa.mean_event_sampled_drawdown, sa.event_sampled_drawdown_95th,
+    ]
+    vals_b = [
+        sb.mean_pnl, sb.median_pnl, sb.pnl_5th_pct, sb.cvar_5th,
+        sb.mean_event_sampled_drawdown, sb.event_sampled_drawdown_95th,
+    ]
 
     fig = go.Figure(
         data=[
@@ -432,11 +446,11 @@ def plot_poisson_vs_hawkes_comparison(
         row=1, col=1,
     )
     fig.add_trace(
-        go.Box(y=p_df["pnl_a"], name="Poisson (Sym)", marker_color="#94a3b8", boxpoints=False),
+        go.Box(y=p_df["pnl_a"], name="Poisson (Sym)", marker_color="#5A6876", boxpoints=False),
         row=1, col=1,
     )
     fig.add_trace(
-        go.Box(y=p_df["pnl_b"], name="Poisson (Inv)", marker_color="#38bdf8", boxpoints=False),
+        go.Box(y=p_df["pnl_b"], name="Poisson (Inv)", marker_color="#45857C", boxpoints=False),
         row=1, col=1,
     )
 
@@ -450,7 +464,11 @@ def plot_poisson_vs_hawkes_comparison(
         row=1, col=2,
     )
     fig.add_trace(
-        go.Box(y=p_df["max_abs_inv_a"], name="Poisson (Sym)", marker_color="#94a3b8", boxpoints=False, showlegend=False),
+        go.Box(y=p_df["max_abs_inv_a"], name="Poisson (Sym)", marker_color="#5A6876", boxpoints=False, showlegend=False),
+        row=1, col=2,
+    )
+    fig.add_trace(
+        go.Box(y=p_df["max_abs_inv_b"], name="Poisson (Inv)", marker_color="#45857C", boxpoints=False, showlegend=False),
         row=1, col=2,
     )
     fig.add_trace(

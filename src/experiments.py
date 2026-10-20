@@ -104,14 +104,195 @@ class PolicySummaryStats:
     loss_probability: float
     pnl_5th_pct: float
     cvar_5th: float
-    mean_drawdown: float
-    drawdown_95th: float
+    mean_event_sampled_drawdown: float
+    event_sampled_drawdown_95th: float
     mean_inventory_util: float
-    mean_abs_inventory: float
+    mean_session_max_abs_inventory: float
+    mean_time_avg_abs_inventory: float
     mean_fills: float
     mean_notional: float
     mean_fees: float
     mean_liquidation_cost: float
+
+    @property
+    def mean_abs_inventory(self) -> float:
+        """Backward-compatible alias for mean_session_max_abs_inventory."""
+        return self.mean_session_max_abs_inventory
+
+    @property
+    def mean_drawdown(self) -> float:
+        """Backward-compatible alias for mean_event_sampled_drawdown."""
+        return self.mean_event_sampled_drawdown
+
+    @property
+    def drawdown_95th(self) -> float:
+        """Backward-compatible alias for event_sampled_drawdown_95th."""
+        return self.event_sampled_drawdown_95th
+
+
+@dataclass
+class IndependentMetricComparison:
+    """Statistical comparison of a metric between independent Hawkes and Poisson simulation suites."""
+
+    metric_name: str
+    hawkes_val: float
+    poisson_val: float
+    diff_val: float            # Hawkes minus Poisson
+    ci_lower: float            # 95% bootstrap CI lower bound
+    ci_upper: float            # 95% bootstrap CI upper bound
+    is_significant: bool       # True if 0 is outside [ci_lower, ci_upper]
+
+
+@dataclass
+class ProcessComparisonResult:
+    """Full independent-sample comparison between Hawkes and Poisson simulation suites for a policy."""
+
+    policy_name: str
+    mean_pnl: IndependentMetricComparison
+    var_5th: IndependentMetricComparison
+    cvar_5th: IndependentMetricComparison
+    mean_drawdown: IndependentMetricComparison
+    mean_max_inventory: IndependentMetricComparison
+    time_avg_inventory: IndependentMetricComparison
+
+
+def compute_independent_metric_bootstrap_ci(
+    data_hawkes: np.ndarray,
+    data_poisson: np.ndarray,
+    metric_func: Callable[[np.ndarray], float],
+    metric_name: str,
+    n_bootstraps: int = 2000,
+    ci_level: float = 0.95,
+    rng: Optional[Union[np.random.Generator, int]] = None,
+) -> IndependentMetricComparison:
+    """Compute non-parametric bootstrap confidence interval for difference between independent samples.
+
+    Evaluates: theta_Hawkes - theta_Poisson
+    Recomputes the metric function inside each resample to properly handle nonlinear statistics.
+    """
+    clean_h = np.asarray(data_hawkes, dtype=np.float64)
+    clean_p = np.asarray(data_poisson, dtype=np.float64)
+
+    n_h = len(clean_h)
+    n_p = len(clean_p)
+
+    if n_h == 0 or n_p == 0:
+        return IndependentMetricComparison(
+            metric_name=metric_name,
+            hawkes_val=0.0,
+            poisson_val=0.0,
+            diff_val=0.0,
+            ci_lower=0.0,
+            ci_upper=0.0,
+            is_significant=False,
+        )
+
+    if not isinstance(rng, np.random.Generator):
+        rng = np.random.default_rng(rng)
+
+    point_h = float(metric_func(clean_h))
+    point_p = float(metric_func(clean_p))
+    point_diff = point_h - point_p
+
+    # Resample independently
+    idx_h = rng.integers(0, n_h, size=(n_bootstraps, n_h))
+    idx_p = rng.integers(0, n_p, size=(n_bootstraps, n_p))
+
+    diffs = np.empty(n_bootstraps, dtype=np.float64)
+    for b in range(n_bootstraps):
+        sample_h = clean_h[idx_h[b]]
+        sample_p = clean_p[idx_p[b]]
+        diffs[b] = metric_func(sample_h) - metric_func(sample_p)
+
+    alpha = 1.0 - ci_level
+    ci_lower = float(np.percentile(diffs, 100.0 * (alpha / 2.0)))
+    ci_upper = float(np.percentile(diffs, 100.0 * (1.0 - alpha / 2.0)))
+
+    # A difference is statistically distinguishable from zero if zero is outside the CI
+    is_sig = (ci_lower > 0.0) or (ci_upper < 0.0)
+
+    return IndependentMetricComparison(
+        metric_name=metric_name,
+        hawkes_val=point_h,
+        poisson_val=point_p,
+        diff_val=point_diff,
+        ci_lower=ci_lower,
+        ci_upper=ci_upper,
+        is_significant=is_sig,
+    )
+
+
+def compute_independent_process_comparison(
+    hawkes_results: MonteCarloResults,
+    poisson_results: MonteCarloResults,
+    policy_key: str = "a",  # "a" or "b"
+    n_bootstraps: int = 2000,
+    seed: int = 42,
+) -> ProcessComparisonResult:
+    """Evaluate independent-sample differences between Hawkes and Poisson suites.
+
+    Computes bootstrap confidence intervals for:
+      - Mean net terminal P&L
+      - 5th percentile terminal P&L (VaR_0.05)
+      - Worst 5% average P&L (CVaR_0.05 / lower-tail expected shortfall)
+      - Mean event-time-sampled maximum drawdown
+      - Mean session maximum absolute inventory
+      - Time-average absolute inventory
+    """
+    df_h = hawkes_results.df_sessions
+    df_p = poisson_results.df_sessions
+    pol_name = "Policy A: Symmetric" if policy_key == "a" else "Policy B: Inventory-Aware"
+
+    pnl_col = f"pnl_{policy_key}"
+    dd_col = f"event_sampled_mdd_{policy_key}" if f"event_sampled_mdd_{policy_key}" in df_h else f"drawdown_{policy_key}"
+    max_inv_col = f"max_abs_inv_{policy_key}"
+    time_inv_col = f"time_avg_inv_{policy_key}" if f"time_avg_inv_{policy_key}" in df_h else f"max_abs_inv_{policy_key}"
+
+    pnl_h = df_h[pnl_col].to_numpy()
+    pnl_p = df_p[pnl_col].to_numpy()
+    dd_h = df_h[dd_col].to_numpy()
+    dd_p = df_p[dd_col].to_numpy()
+    max_inv_h = df_h[max_inv_col].to_numpy()
+    max_inv_p = df_p[max_inv_col].to_numpy()
+    time_inv_h = df_h[time_inv_col].to_numpy()
+    time_inv_p = df_p[time_inv_col].to_numpy()
+
+    rng = np.random.default_rng(seed)
+
+    comp_mean = compute_independent_metric_bootstrap_ci(
+        pnl_h, pnl_p, metric_func=np.mean, metric_name="Mean Net P&L",
+        n_bootstraps=n_bootstraps, rng=rng,
+    )
+    comp_var = compute_independent_metric_bootstrap_ci(
+        pnl_h, pnl_p, metric_func=lambda x: np.percentile(x, 5.0), metric_name="5th Percentile VaR",
+        n_bootstraps=n_bootstraps, rng=rng,
+    )
+    comp_cvar = compute_independent_metric_bootstrap_ci(
+        pnl_h, pnl_p, metric_func=lambda x: compute_cvar(x, 0.05), metric_name="Worst 5% CVaR",
+        n_bootstraps=n_bootstraps, rng=rng,
+    )
+    comp_dd = compute_independent_metric_bootstrap_ci(
+        dd_h, dd_p, metric_func=np.mean, metric_name="Mean Event-Sampled Max Drawdown",
+        n_bootstraps=n_bootstraps, rng=rng,
+    )
+    comp_max_inv = compute_independent_metric_bootstrap_ci(
+        max_inv_h, max_inv_p, metric_func=np.mean, metric_name="Mean Peak Absolute Inventory",
+        n_bootstraps=n_bootstraps, rng=rng,
+    )
+    comp_time_inv = compute_independent_metric_bootstrap_ci(
+        time_inv_h, time_inv_p, metric_func=np.mean, metric_name="Time-Average Absolute Inventory",
+        n_bootstraps=n_bootstraps, rng=rng,
+    )
+
+    return ProcessComparisonResult(
+        policy_name=pol_name,
+        mean_pnl=comp_mean,
+        var_5th=comp_var,
+        cvar_5th=comp_cvar,
+        mean_drawdown=comp_dd,
+        mean_max_inventory=comp_max_inv,
+        time_avg_inventory=comp_time_inv,
+    )
 
 
 @dataclass
@@ -152,6 +333,7 @@ def summarize_policy_metrics(
     fees_arr: np.ndarray,
     liq_arr: np.ndarray,
     policy_name: str,
+    time_avg_inv_arr: Optional[np.ndarray] = None,
     seed: int = 42,
 ) -> PolicySummaryStats:
     """Compute aggregate risk and performance statistics for a policy."""
@@ -161,6 +343,8 @@ def summarize_policy_metrics(
     cvar_5 = compute_cvar(pnl_arr, quantile=0.05)
     loss_prob = float(np.mean(pnl_arr < 0.0)) if n > 0 else 0.0
     dd_95 = float(np.percentile(dd_arr, 95.0)) if n > 0 else 0.0
+
+    mean_time_inv = float(np.mean(time_avg_inv_arr)) if time_avg_inv_arr is not None and len(time_avg_inv_arr) > 0 else float(np.mean(max_inv_arr))
 
     return PolicySummaryStats(
         policy_name=policy_name,
@@ -173,10 +357,11 @@ def summarize_policy_metrics(
         loss_probability=loss_prob,
         pnl_5th_pct=pnl_5,
         cvar_5th=cvar_5,
-        mean_drawdown=float(np.mean(dd_arr)),
-        drawdown_95th=dd_95,
+        mean_event_sampled_drawdown=float(np.mean(dd_arr)),
+        event_sampled_drawdown_95th=dd_95,
         mean_inventory_util=float(np.mean(util_arr)),
-        mean_abs_inventory=float(np.mean(max_inv_arr)),
+        mean_session_max_abs_inventory=float(np.mean(max_inv_arr)),
+        mean_time_avg_abs_inventory=mean_time_inv,
         mean_fills=float(np.mean(fills_arr)),
         mean_notional=float(np.mean(notional_arr)),
         mean_fees=float(np.mean(fees_arr)),
@@ -275,7 +460,8 @@ def run_monte_carlo_paired(
             "n_events": len(res.events),
             "n_buys": res.events.n_buys,
             "n_sells": res.events.n_sells,
-            "price_return_bps": res.price_path.total_return_bps,
+            "log_price_return_bps": res.price_path.log_price_return_bps,
+            "price_return_bps": res.price_path.log_price_return_bps,
             # Policy A
             "pnl_a": ma.net_terminal_pnl,
             "mtm_pnl_a": ma.mtm_terminal_pnl,
@@ -285,8 +471,10 @@ def run_monte_carlo_paired(
             "notional_a": ma.traded_notional,
             "term_inv_a": ma.terminal_inventory,
             "max_abs_inv_a": ma.max_abs_inventory,
+            "time_avg_inv_a": ma.time_average_abs_inventory,
             "inv_util_a": ma.inventory_utilization,
-            "drawdown_a": ma.max_drawdown,
+            "event_sampled_mdd_a": ma.event_sampled_max_drawdown,
+            "drawdown_a": ma.event_sampled_max_drawdown,
             # Policy B
             "pnl_b": mb.net_terminal_pnl,
             "mtm_pnl_b": mb.mtm_terminal_pnl,
@@ -296,8 +484,10 @@ def run_monte_carlo_paired(
             "notional_b": mb.traded_notional,
             "term_inv_b": mb.terminal_inventory,
             "max_abs_inv_b": mb.max_abs_inventory,
+            "time_avg_inv_b": mb.time_average_abs_inventory,
             "inv_util_b": mb.inventory_utilization,
-            "drawdown_b": mb.max_drawdown,
+            "event_sampled_mdd_b": mb.event_sampled_max_drawdown,
+            "drawdown_b": mb.event_sampled_max_drawdown,
             # Paired difference
             "pnl_diff_b_minus_a": mb.net_terminal_pnl - ma.net_terminal_pnl,
         })
@@ -309,9 +499,10 @@ def run_monte_carlo_paired(
 
     stats_a = summarize_policy_metrics(
         pnl_arr=df["pnl_a"].to_numpy(),
-        dd_arr=df["drawdown_a"].to_numpy(),
+        dd_arr=df["event_sampled_mdd_a"].to_numpy(),
         util_arr=df["inv_util_a"].to_numpy(),
         max_inv_arr=df["max_abs_inv_a"].to_numpy(),
+        time_avg_inv_arr=df["time_avg_inv_a"].to_numpy(),
         fills_arr=df["fills_a"].to_numpy(),
         notional_arr=df["notional_a"].to_numpy(),
         fees_arr=df["fees_a"].to_numpy(),
@@ -322,9 +513,10 @@ def run_monte_carlo_paired(
 
     stats_b = summarize_policy_metrics(
         pnl_arr=df["pnl_b"].to_numpy(),
-        dd_arr=df["drawdown_b"].to_numpy(),
+        dd_arr=df["event_sampled_mdd_b"].to_numpy(),
         util_arr=df["inv_util_b"].to_numpy(),
         max_inv_arr=df["max_abs_inv_b"].to_numpy(),
+        time_avg_inv_arr=df["time_avg_inv_b"].to_numpy(),
         fills_arr=df["fills_b"].to_numpy(),
         notional_arr=df["notional_b"].to_numpy(),
         fees_arr=df["fees_b"].to_numpy(),

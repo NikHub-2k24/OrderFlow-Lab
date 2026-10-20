@@ -166,19 +166,19 @@ def simulate_poisson_matched(
     t_max: float = 1.0,
     rng: Optional[Union[np.random.Generator, int]] = None,
 ) -> PointProcessEvents:
-    """Simulate a matched Poisson process with the same theoretical mean intensity per side.
+    """Simulate a matched Poisson process matching finite-horizon expected event count per side.
 
-    Theoretical mean rate per side:
-      mean_rate = mu / (1 - branching_ratio)
+    Finite-horizon matched rate per side:
+      matched_rate = E[N(t_max)] / t_max
     Total arrival rate:
-      total_rate = 2 * mean_rate
+      total_rate = 2 * matched_rate
 
     Each arrival is independently assigned BUY or SELL with probability 0.5.
 
     Parameters
     ----------
     params : HawkesParams
-        Hawkes parameters from which the matched mean rate is computed.
+        Hawkes parameters from which the finite-horizon matched rate is computed.
     t_max : float
         Session length (default 1.0).
     rng : np.random.Generator or int, optional
@@ -197,8 +197,8 @@ def simulate_poisson_matched(
     if not isinstance(rng, np.random.Generator):
         rng = np.random.default_rng(rng)
 
-    mean_rate_per_side = params.theoretical_mean_rate_per_side
-    total_rate = 2.0 * mean_rate_per_side
+    matched_rate_per_side = params.finite_horizon_matched_rate_per_side(t_max=t_max)
+    total_rate = 2.0 * matched_rate_per_side
 
     times_list: List[float] = []
     types_list: List[int] = []
@@ -218,8 +218,8 @@ def simulate_poisson_matched(
     return PointProcessEvents(
         timestamps=np.array(times_list, dtype=np.float64),
         event_types=np.array(types_list, dtype=np.int32),
-        lambda_buy=np.full(n_events, mean_rate_per_side, dtype=np.float64),
-        lambda_sell=np.full(n_events, mean_rate_per_side, dtype=np.float64),
+        lambda_buy=np.full(n_events, matched_rate_per_side, dtype=np.float64),
+        lambda_sell=np.full(n_events, matched_rate_per_side, dtype=np.float64),
         process_type="poisson",
     )
 
@@ -246,7 +246,11 @@ def compute_continuous_intensities(
         (lambda_buy_grid, lambda_sell_grid)
     """
     if events.process_type == "poisson":
-        rate = params.theoretical_mean_rate_per_side
+        if len(events.lambda_buy) > 0:
+            rate = float(events.lambda_buy[0])
+        else:
+            t_h = float(grid_times[-1]) if len(grid_times) > 0 else 1.0
+            rate = params.finite_horizon_matched_rate_per_side(t_max=t_h)
         return np.full_like(grid_times, rate), np.full_like(grid_times, rate)
 
     mu = params.mu

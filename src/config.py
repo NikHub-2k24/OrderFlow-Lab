@@ -1,6 +1,7 @@
 """Configuration schemas and input validation for OrderFlow Lab."""
 
 from __future__ import annotations
+import math
 from dataclasses import dataclass, field
 from typing import Tuple
 
@@ -45,14 +46,57 @@ class HawkesParams:
         return (self.alpha_self + self.alpha_cross) / self.beta
 
     @property
-    def theoretical_mean_rate_per_side(self) -> float:
-        """Theoretical stationary mean event intensity per side: mu / (1 - branching_ratio)."""
+    def stationary_mean_rate_per_side(self) -> float:
+        """Asymptotic stationary mean event intensity per side: mu / (1 - branching_ratio).
+
+        Note: This is the infinite-horizon stationary rate. Over a finite session horizon T
+        with zero-history initial conditions (x(0) = 0), the expected rate is strictly lower.
+        """
         return self.mu / (1.0 - self.branching_ratio)
 
     @property
+    def theoretical_mean_rate_per_side(self) -> float:
+        """Backward-compatible alias for stationary_mean_rate_per_side."""
+        return self.stationary_mean_rate_per_side
+
+    @property
     def theoretical_total_rate(self) -> float:
-        """Theoretical total event intensity across both sides."""
-        return 2.0 * self.theoretical_mean_rate_per_side
+        """Asymptotic stationary total event intensity across both sides."""
+        return 2.0 * self.stationary_mean_rate_per_side
+
+    def expected_count_per_side(self, t_max: float = 1.0) -> float:
+        """Exact finite-horizon expected event count per side under zero-history initial state.
+
+        Formula:
+          a = alpha_self + alpha_cross
+          eta = a / beta
+          gamma = beta - a = beta * (1 - eta)
+          E[N(T)] = (mu / (1 - eta)) * T - (mu * eta / (1 - eta)) * (1 - exp(-gamma * T)) / gamma
+
+        Handles eta == 0 gracefully without division errors.
+        """
+        if t_max <= 0:
+            return 0.0
+
+        eta = self.branching_ratio
+        if eta <= 1e-12:
+            return self.mu * t_max
+
+        a = self.alpha_self + self.alpha_cross
+        gamma = self.beta - a  # gamma > 0 since eta < 1
+        mu_over_one_minus_eta = self.mu / (1.0 - eta)
+
+        transient_term = (self.mu * eta / (1.0 - eta)) * ((1.0 - math.exp(-gamma * t_max)) / gamma)
+        return float(mu_over_one_minus_eta * t_max - transient_term)
+
+    def finite_horizon_matched_rate_per_side(self, t_max: float = 1.0) -> float:
+        """Constant arrival rate per side matching Hawkes expected event count over [0, t_max].
+
+        lambda_matched = E[N(t_max)] / t_max
+        """
+        if t_max <= 0:
+            return self.mu
+        return self.expected_count_per_side(t_max=t_max) / t_max
 
 
 @dataclass(frozen=True)

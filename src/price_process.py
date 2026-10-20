@@ -29,8 +29,14 @@ class MarketPricePath:
         return float(self.mid_prices[0])
 
     @property
-    def total_return_bps(self) -> float:
+    def log_price_return_bps(self) -> float:
+        """Terminal session log return in basis points: 10,000 * ln(S_T / S_0)."""
         return float(10_000.0 * np.log(self.terminal_mid_price / self.initial_mid_price))
+
+    @property
+    def total_return_bps(self) -> float:
+        """Backward-compatible alias for log_price_return_bps."""
+        return self.log_price_return_bps
 
 
 def simulate_reference_price_path(

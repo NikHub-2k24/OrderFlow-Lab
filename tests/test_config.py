@@ -64,3 +64,28 @@ def test_policy_params_validation():
 
     with pytest.raises(ValueError, match="p0 must be in"):
         PolicyParams(p0=1.2)
+
+
+def test_hawkes_params_finite_horizon_expected_count():
+    # Symmetric parameters: mu=20, a=10, beta=20 -> eta=0.5, gamma=10
+    # Over T=1.0: E[N(1)] = (20/0.5)*1 - (20*0.5/0.5)*(1 - exp(-10))/10 = 40 - 20*(1 - exp(-10))/10 = 40 - 2 = 38
+    p = HawkesParams(mu=20.0, alpha_self=5.0, alpha_cross=5.0, beta=20.0)
+    cnt = p.expected_count_per_side(t_max=1.0)
+    assert cnt == pytest.approx(38.0, rel=1e-4)
+
+    # Matched rate
+    rate = p.finite_horizon_matched_rate_per_side(t_max=1.0)
+    assert rate == pytest.approx(38.0, rel=1e-4)
+    # Stationary rate is 40.0
+    assert p.stationary_mean_rate_per_side == pytest.approx(40.0)
+    assert rate < p.stationary_mean_rate_per_side
+
+    # Zero excitation: eta = 0
+    p_zero = HawkesParams(mu=15.0, alpha_self=0.0, alpha_cross=0.0, beta=10.0)
+    assert p_zero.expected_count_per_side(t_max=2.0) == pytest.approx(30.0)
+    assert p_zero.finite_horizon_matched_rate_per_side(t_max=2.0) == pytest.approx(15.0)
+
+    # Non-positive horizon edge cases
+    assert p.expected_count_per_side(t_max=0.0) == 0.0
+    assert p.finite_horizon_matched_rate_per_side(t_max=0.0) == p.mu
+

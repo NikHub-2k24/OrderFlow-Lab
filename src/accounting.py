@@ -39,9 +39,11 @@ class SessionMetrics:
     n_sell_fills: int             # Fills where dealer sold (buyer lifted dealer ask)
     traded_notional: float        # Total traded dollar notional
     terminal_inventory: int       # Signed inventory at session end
-    max_abs_inventory: int        # Maximum absolute inventory during session
+    max_abs_inventory: int        # Peak absolute inventory during session
+    time_average_abs_inventory: float  # Time-weighted integral(abs(q(t)) dt) / T
     inventory_utilization: float  # max_abs_inventory / max_inventory
-    max_drawdown: float           # Maximum peak-to-trough equity drawdown
+    event_sampled_max_drawdown: float  # Event-time-sampled peak-to-trough equity drawdown
+    max_drawdown: float           # Backward-compatible alias for event_sampled_max_drawdown
     is_loss: bool                 # True if net_terminal_pnl < 0
 
 

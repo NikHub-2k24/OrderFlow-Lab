@@ -15,6 +15,7 @@ from src.experiments import (
     run_monte_carlo_paired,
     run_poisson_vs_hawkes_experiment,
     run_sensitivity_sweep,
+    compute_independent_process_comparison,
     MonteCarloResults,
 )
 from src.visualization import (
@@ -24,89 +25,105 @@ from src.visualization import (
     plot_tail_risk_metrics_bar,
     plot_poisson_vs_hawkes_comparison,
     plot_sensitivity_curve,
+    COLOR_POLICY_A,
+    COLOR_POLICY_B,
+    COLOR_BUY,
+    COLOR_SELL,
 )
 
 # Page configuration
 st.set_page_config(
-    page_title="OrderFlow Lab | Hawkes & Inventory-Aware Quoting",
+    page_title="OrderFlow Lab | Quantitative Microstructure Research",
     page_icon="⚖️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Subtle institutional CSS styling
+# Restrained institutional dark CSS styling
 st.markdown(
     """
     <style>
     .main-title {
-        font-size: 1.65rem;
+        font-size: 1.60rem;
         font-weight: 650;
-        color: #0f172a;
-        margin-bottom: 0.2rem;
+        color: #E5E9ED;
+        margin-bottom: 0.15rem;
         letter-spacing: -0.02em;
     }
     .sub-title {
-        font-size: 0.95rem;
-        color: #475569;
-        margin-bottom: 1.2rem;
+        font-size: 0.90rem;
+        color: #A6B0BB;
+        margin-bottom: 1.1rem;
     }
     .section-header {
-        font-size: 1.15rem;
+        font-size: 1.10rem;
         font-weight: 600;
-        color: #1e293b;
-        margin-top: 1.2rem;
-        margin-bottom: 0.6rem;
-        border-bottom: 1px solid #e2e8f0;
-        padding-bottom: 0.3rem;
+        color: #E5E9ED;
+        margin-top: 1.1rem;
+        margin-bottom: 0.5rem;
+        border-bottom: 1px solid #303943;
+        padding-bottom: 0.25rem;
     }
     .metric-card {
-        background-color: #f8fafc;
-        border: 1px solid #e2e8f0;
+        background-color: #191F26;
+        border: 1px solid #303943;
         border-radius: 4px;
         padding: 10px 14px;
         margin-bottom: 8px;
     }
     .metric-label {
-        font-size: 0.78rem;
-        color: #64748b;
+        font-size: 0.75rem;
+        color: #A6B0BB;
         text-transform: uppercase;
         letter-spacing: 0.04em;
         margin-bottom: 2px;
     }
     .metric-value {
-        font-size: 1.25rem;
+        font-size: 1.20rem;
         font-weight: 600;
-        color: #0f172a;
+        color: #E5E9ED;
     }
     .metric-sub {
         font-size: 0.75rem;
-        color: #64748b;
+        color: #A6B0BB;
     }
     .stat-badge-pos {
-        color: #15803d;
+        color: #69B68A;
         font-weight: 600;
     }
     .stat-badge-neg {
-        color: #b91c1c;
+        color: #D77979;
         font-weight: 600;
     }
     .callout-box {
-        background-color: #f1f5f9;
-        border-left: 3px solid #3b82f6;
+        background-color: #191F26;
+        border-left: 3px solid #70AFA7;
+        border-top: 1px solid #303943;
+        border-right: 1px solid #303943;
+        border-bottom: 1px solid #303943;
         padding: 10px 14px;
         border-radius: 0 4px 4px 0;
-        font-size: 0.88rem;
-        color: #334155;
+        font-size: 0.85rem;
+        color: #E5E9ED;
         margin: 10px 0;
     }
     .warning-box {
-        background-color: #fffbeb;
-        border-left: 3px solid #d97706;
+        background-color: #201B1A;
+        border-left: 3px solid #D77979;
+        border-top: 1px solid #3A2A28;
+        border-right: 1px solid #3A2A28;
+        border-bottom: 1px solid #3A2A28;
         padding: 10px 14px;
         border-radius: 0 4px 4px 0;
-        font-size: 0.88rem;
-        color: #92400e;
+        font-size: 0.85rem;
+        color: #F1D2D2;
         margin: 10px 0;
+    }
+    code {
+        color: #70AFA7;
+        background-color: #111418;
+        padding: 1px 4px;
+        border-radius: 3px;
     }
     </style>
     """,
@@ -267,7 +284,7 @@ def get_cached_sensitivity_sweep(
 with st.sidebar:
     st.markdown("### OrderFlow Lab")
     st.markdown(
-        "<span style='font-size:0.8rem; color:#64748b;'>Quantitative Microstructure Simulator</span>",
+        "<span style='font-size:0.8rem; color:#A6B0BB;'>Quantitative Microstructure Simulator</span>",
         unsafe_allow_html=True,
     )
     st.divider()
@@ -306,27 +323,34 @@ with st.sidebar:
             help="Exponential memory decay per normalized session",
         )
 
-        branching_ratio = (alpha_self + alpha_cross) / beta
-        is_stable = branching_ratio < 1.0
+        try:
+            h_preview = HawkesParams(mu=mu, alpha_self=alpha_self, alpha_cross=alpha_cross, beta=beta)
+            branching_ratio = h_preview.branching_ratio
+            is_stable = branching_ratio < 1.0
 
-        if is_stable:
-            mean_rate_side = mu / (1.0 - branching_ratio)
-            tot_rate = 2.0 * mean_rate_side
-            st.markdown(
-                f"""
-                <div style='background:#f8fafc; padding:8px; border-radius:4px; font-size:0.8rem; border:1px solid #cbd5e1;'>
-                <b>Branching Ratio:</b> <code>{branching_ratio:.3f}</code> (&lt; 1.0 Subcritical)<br>
-                <b>Mean Rate / Side:</b> <code>{mean_rate_side:.1f}</code> / sess<br>
-                <b>Total Expected Rate:</b> <code>{tot_rate:.1f}</code> / sess
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.error(
-                f"Unstable Hawkes Process! Branching ratio ({branching_ratio:.3f}) >= 1.0. "
-                "Adjust parameters so that (alpha_self + alpha_cross) < beta."
-            )
+            if is_stable:
+                stat_rate = h_preview.stationary_mean_rate_per_side
+                finite_rate = h_preview.finite_horizon_matched_rate_per_side(t_max=1.0)
+                expected_count = h_preview.expected_count_per_side(t_max=1.0)
+                st.markdown(
+                    f"""
+                    <div style='background:#111418; padding:10px; border-radius:4px; font-size:0.78rem; border:1px solid #303943; color:#E5E9ED;'>
+                    <b>Branching Ratio (&eta;):</b> <code>{branching_ratio:.3f}</code> (&lt; 1.0 Subcritical)<br>
+                    <b>Stationary Intensity:</b> <code>{stat_rate:.1f}</code> / side (t &rarr; &infin;)<br>
+                    <b>Finite Matched Rate (T=1):</b> <code>{finite_rate:.1f}</code> / side<br>
+                    <b>Expected Count E[N(1)]:</b> <code>{expected_count:.1f}</code> / side
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.error(
+                    f"Unstable Hawkes Process! Branching ratio ({branching_ratio:.3f}) >= 1.0. "
+                    "Adjust parameters so that (alpha_self + alpha_cross) < beta."
+                )
+        except ValueError as e:
+            is_stable = False
+            st.error(str(e))
 
     with st.expander("Reference-Price Dynamics", expanded=False):
         s0 = st.number_input("Initial Mid Price ($)", min_value=1.0, max_value=10000.0, value=100.0, step=10.0)
@@ -356,7 +380,7 @@ with st.sidebar:
 
     st.markdown(
         """
-        <div style='font-size:0.75rem; color:#94a3b8; margin-top:15px; line-height:1.3;'>
+        <div style='font-size:0.75rem; color:#A6B0BB; margin-top:15px; line-height:1.3;'>
         <b>Offline Operational Mode:</b><br>
         All processes evaluated numerically with deterministic random streams. No runtime external APIs.
         </div>
@@ -367,7 +391,7 @@ with st.sidebar:
 # Stop execution gracefully if parameters are physically unstable
 if not is_stable:
     st.error(
-        f"Parameter Validation Error: Branching ratio {branching_ratio:.4f} >= 1.0 violates subcriticality. "
+        f"Parameter Validation Error: Branching ratio >= 1.0 violates subcriticality. "
         "Hawkes processes with branching ratio >= 1 produce infinite intensity cascades. "
         "Please reduce alpha_self or alpha_cross, or increase decay rate beta in the sidebar."
     )
@@ -406,12 +430,12 @@ with tab_overview:
             """
             <div class="metric-card">
                 <div class="metric-label">Research Question 1</div>
-                <div style="font-size:0.95rem; font-weight:600; color:#1e293b; margin-top:4px;">
+                <div style="font-size:0.92rem; font-weight:600; color:#E5E9ED; margin-top:4px;">
                 Endogenous Clustering vs Poisson
                 </div>
-                <p style="font-size:0.82rem; color:#475569; margin-top:6px; line-height:1.4;">
+                <p style="font-size:0.80rem; color:#A6B0BB; margin-top:6px; line-height:1.4;">
                 How does temporal and cross-excitation clustering in order flow distort market-maker inventory risk
-                relative to memoryless Poisson arrivals with identical theoretical mean intensity?
+                relative to memoryless Poisson arrivals with the <b>identical finite-horizon expected count</b>?
                 </p>
             </div>
             """,
@@ -422,10 +446,10 @@ with tab_overview:
             """
             <div class="metric-card">
                 <div class="metric-label">Research Question 2</div>
-                <div style="font-size:0.95rem; font-weight:600; color:#1e293b; margin-top:4px;">
+                <div style="font-size:0.92rem; font-weight:600; color:#E5E9ED; margin-top:4px;">
                 Inventory-Aware Skew vs Symmetric Quoting
                 </div>
-                <p style="font-size:0.82rem; color:#475569; margin-top:6px; line-height:1.4;">
+                <p style="font-size:0.80rem; color:#A6B0BB; margin-top:6px; line-height:1.4;">
                 Can asymmetric reservation-price quoting reduce inventory tail exposure and residual liquidation penalties
                 without excessively sacrificing spread capture or fill frequency?
                 </p>
@@ -438,10 +462,10 @@ with tab_overview:
             """
             <div class="metric-card">
                 <div class="metric-label">Research Question 3</div>
-                <div style="font-size:0.95rem; font-weight:600; color:#1e293b; margin-top:4px;">
+                <div style="font-size:0.92rem; font-weight:600; color:#E5E9ED; margin-top:4px;">
                 Frictions, Volatility & Adverse Selection
                 </div>
-                <p style="font-size:0.82rem; color:#475569; margin-top:6px; line-height:1.4;">
+                <p style="font-size:0.80rem; color:#A6B0BB; margin-top:6px; line-height:1.4;">
                 How do permanent order impact (adverse selection), diffusion volatility, and transaction fees interact
                 to shift terminal P&L distributions and Conditional Value-at-Risk (worst 5% CVaR)?
                 </p>
@@ -464,9 +488,10 @@ with tab_overview:
         +----------------------------------------------------------------------------------------+
         |                                    STOCHASTIC GENERATOR                                |
         |                                                                                        |
-        |   Bivariate Hawkes Process (Ogata Thinning)  OR  Matched-Mean Poisson Baseline        |
+        |   Bivariate Hawkes Process (Ogata Thinning)  OR  Matched Finite-Horizon Poisson        |
         |   Buy Arrival Rate:  lambda_buy(t)  = mu + alpha_self * x_b(t) + alpha_cross * x_s(t)  |
         |   Sell Arrival Rate: lambda_sell(t) = mu + alpha_self * x_s(t) + alpha_cross * x_b(t)  |
+        |   Matched Poisson Rate: lambda_Poisson = E[N(T)] / T  (Exact Finite Expected Count)     |
         +-------------------------------------------+--------------------------------------------+
                                                     |  (Order Flow Timestamps & Signs)
                                                     v
@@ -476,7 +501,7 @@ with tab_overview:
         |   delta_log_price = sigma * sqrt(delta_t) * Z + sign * (impact_bps / 10000)            |
         |   (Exogenous price path: Brownian noise + broader-market signed order-flow impact)     |
         +-------------------------------------------+--------------------------------------------+
-                                                    |  Identical Path & Common Random Draws
+                                                    |  Identical Path & Common Random Draws (CRN)
                          +--------------------------+--------------------------+
                          |                                                     |
                          v                                                     v
@@ -495,7 +520,8 @@ with tab_overview:
         |                          ACCOUNTING & LIQUIDATION ENGINE                               |
         |                                                                                        |
         |   - Execution price, fee deduction (fee_bps), cash & signed inventory tracking        |
-        |   - Continuous Mark-to-Market Equity & Session Drawdown                                |
+        |   - Continuous Mark-to-Market Equity & Event-Time-Sampled Session Drawdown             |
+        |   - Time-Average Absolute Inventory: (1/T) * integral(|q(t)| dt)                       |
         |   - Terminal Liquidation: Residual inventory liquidated at (mid -/+ half_spread)       |
         |     plus liquidation transaction fee. Ensures no inflated MTM reporting.              |
         +----------------------------------------------------------------------------------------+
@@ -515,10 +541,12 @@ with tab_overview:
                 cancellations, or latency.</li>
                 <li><b>Exogenous Impact:</b> Each trade permanently shifts the log mid-price by <code>+/- impact_bps</code>
                 representing stylized broader market reaction, independent of whether our dealer fills.</li>
+                <li><b>Finite-Horizon Rate Matching:</b> The Poisson comparator rate is calibrated to the exact expected
+                count <code>E[N(T)] / T</code> over <code>[0, T]</code> for zero initial state, not the asymptotic stationary rate.</li>
                 <li><b>Terminal Liquidation Penalty:</b> Residual inventory at session end is forced to cross the base
                 half-spread and pay liquidation fees. Net terminal P&L is strictly bounded above by mark-to-mid equity.</li>
-                <li><b>Non-Commercial Research:</b> These are synthetic simulations for academic study of risk mechanics,
-                not live trading backtests or claims of profitability.</li>
+                <li><b>Variance Reduction via CRN:</b> Common Random Numbers (CRN) are used to reduce variance of paired policy
+                comparisons across matched paths, not eliminate path variance entirely.</li>
             </ul>
             </div>
             """,
@@ -530,12 +558,13 @@ with tab_overview:
             f"""
             <div class="metric-card">
                 <div class="metric-label">Active Parameter State</div>
-                <table style="width:100%; font-size:0.8rem; color:#334155; margin-top:4px;">
+                <table style="width:100%; font-size:0.8rem; color:#E5E9ED; margin-top:4px;">
                     <tr><td><b>Hawkes mu:</b></td><td>{mu:.1f} / sess</td></tr>
                     <tr><td><b>Alpha Self / Cross:</b></td><td>{alpha_self:.1f} / {alpha_cross:.1f}</td></tr>
                     <tr><td><b>Decay Beta:</b></td><td>{beta:.1f} / sess</td></tr>
                     <tr><td><b>Branching Ratio:</b></td><td>{branching_ratio:.3f}</td></tr>
-                    <tr><td><b>Matched Mean Rate:</b></td><td>{mu / (1.0 - branching_ratio):.1f} / side</td></tr>
+                    <tr><td><b>Stationary Intensity:</b></td><td>{h_preview.stationary_mean_rate_per_side:.1f} / side</td></tr>
+                    <tr><td><b>Matched Finite Rate:</b></td><td>{h_preview.finite_horizon_matched_rate_per_side(1.0):.1f} / side</td></tr>
                     <tr><td><b>Brownian Sigma:</b></td><td>{sigma:.3f} / &radic;sess</td></tr>
                     <tr><td><b>Event Impact:</b></td><td>{impact_bps:.1f} bps</td></tr>
                     <tr><td><b>Half-Spread:</b></td><td>{half_spread_bps:.1f} bps</td></tr>
@@ -603,11 +632,12 @@ with tab_single:
             unsafe_allow_html=True,
         )
     with col_m2:
+        ret_val = session_res.price_path.log_price_return_bps
         st.markdown(
             f"""
             <div class="metric-card">
-                <div class="metric-label">Mid-Price Return</div>
-                <div class="metric-value">{session_res.price_path.total_return_bps:+.1f} <span style="font-size:0.8rem;">bps</span></div>
+                <div class="metric-label">Log Price Return</div>
+                <div class="metric-value">{ret_val:+.1f} <span style="font-size:0.8rem;">bps</span></div>
                 <div class="metric-sub">${session_res.price_path.initial_mid_price:.2f} &rarr; ${session_res.price_path.terminal_mid_price:.2f}</div>
             </div>
             """,
@@ -621,8 +651,8 @@ with tab_single:
             <div class="metric-card">
                 <div class="metric-label">Net P&L (Policy A vs B)</div>
                 <div class="metric-value">
-                    <span style="color:#475569;">${ma.net_terminal_pnl:+.2f}</span> /
-                    <span style="color:#1d4ed8;">${mb.net_terminal_pnl:+.2f}</span>
+                    <span style="color:#8899A6;">${ma.net_terminal_pnl:+.2f}</span> /
+                    <span style="color:#70AFA7;">${mb.net_terminal_pnl:+.2f}</span>
                 </div>
                 <div class="metric-sub">Diff (B - A): <span class="{diff_class}">${pnl_diff:+.2f}</span></div>
             </div>
@@ -633,12 +663,12 @@ with tab_single:
         st.markdown(
             f"""
             <div class="metric-card">
-                <div class="metric-label">Terminal Inventory</div>
+                <div class="metric-label">Time-Avg Inventory</div>
                 <div class="metric-value">
-                    <span style="color:#475569;">{ma.terminal_inventory:+d}</span> /
-                    <span style="color:#1d4ed8;">{mb.terminal_inventory:+d}</span>
+                    <span style="color:#8899A6;">{ma.time_average_abs_inventory:.2f}</span> /
+                    <span style="color:#70AFA7;">{mb.time_average_abs_inventory:.2f}</span>
                 </div>
-                <div class="metric-sub">Max Abs: {ma.max_abs_inventory} (A) vs {mb.max_abs_inventory} (B)</div>
+                <div class="metric-sub">Peak: {ma.max_abs_inventory} (A) vs {mb.max_abs_inventory} (B)</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -678,7 +708,8 @@ with tab_mc:
     st.markdown("### Paired Monte Carlo Simulation & Risk Distributions")
     st.markdown(
         f"Evaluating **{n_sessions} paired paths** generated under identical seeds and Common Random Numbers (CRN). "
-        "Every market path is evaluated simultaneously across both Policy A (Symmetric) and Policy B (Inventory-Aware)."
+        "Every market path is evaluated simultaneously across both Policy A (Symmetric) and Policy B (Inventory-Aware). "
+        "Common random numbers reduce comparison variance across matched replicates."
     )
 
     mc_results = get_cached_monte_carlo(
@@ -747,13 +778,31 @@ with tab_mc:
                     "Paired Difference (B - A)": f"{sb.loss_probability - sa.loss_probability:+.1%}",
                 },
                 {
-                    "Metric": "Mean Max Drawdown",
-                    "Policy A: Symmetric": f"${sa.mean_drawdown:.2f}",
-                    "Policy B: Inventory-Aware": f"${sb.mean_drawdown:.2f}",
-                    "Paired Difference (B - A)": f"${sb.mean_drawdown - sa.mean_drawdown:+.2f}",
+                    "Metric": "Mean Event-Sampled Max Drawdown",
+                    "Policy A: Symmetric": f"${sa.mean_event_sampled_drawdown:.2f}",
+                    "Policy B: Inventory-Aware": f"${sb.mean_event_sampled_drawdown:.2f}",
+                    "Paired Difference (B - A)": f"${sb.mean_event_sampled_drawdown - sa.mean_event_sampled_drawdown:+.2f}",
                 },
                 {
-                    "Metric": "Mean Inventory Utilization (|q|_max / Q_max)",
+                    "Metric": "95th Percentile Event-Sampled Drawdown",
+                    "Policy A: Symmetric": f"${sa.event_sampled_drawdown_95th:.2f}",
+                    "Policy B: Inventory-Aware": f"${sb.event_sampled_drawdown_95th:.2f}",
+                    "Paired Difference (B - A)": f"${sb.event_sampled_drawdown_95th - sa.event_sampled_drawdown_95th:+.2f}",
+                },
+                {
+                    "Metric": "Time-Average Absolute Inventory (holding weighted)",
+                    "Policy A: Symmetric": f"{sa.mean_time_avg_abs_inventory:.2f} units",
+                    "Policy B: Inventory-Aware": f"{sb.mean_time_avg_abs_inventory:.2f} units",
+                    "Paired Difference (B - A)": f"{sb.mean_time_avg_abs_inventory - sa.mean_time_avg_abs_inventory:+.2f} units",
+                },
+                {
+                    "Metric": "Mean Session Peak Absolute Inventory",
+                    "Policy A: Symmetric": f"{sa.mean_session_max_abs_inventory:.2f} units",
+                    "Policy B: Inventory-Aware": f"{sb.mean_session_max_abs_inventory:.2f} units",
+                    "Paired Difference (B - A)": f"{sb.mean_session_max_abs_inventory - sa.mean_session_max_abs_inventory:+.2f} units",
+                },
+                {
+                    "Metric": "Mean Inventory Utilization (peak / Q_max)",
                     "Policy A: Symmetric": f"{sa.mean_inventory_util:.1%}",
                     "Policy B: Inventory-Aware": f"{sb.mean_inventory_util:.1%}",
                     "Paired Difference (B - A)": f"{sb.mean_inventory_util - sa.mean_inventory_util:+.1%}",
@@ -775,7 +824,7 @@ with tab_mc:
         st.dataframe(summary_df, hide_index=True, use_container_width=True)
 
     with col_t2:
-        st.markdown('<div class="section-header">Hypothesis Test: Policy Difference</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-header">Paired Policy Hypothesis Test</div>', unsafe_allow_html=True)
         st.markdown(
             f"""
             <div class="metric-card">
@@ -790,11 +839,11 @@ with tab_mc:
             </div>
             <div class="metric-card">
                 <div class="metric-label">Paired Student's t-Test</div>
-                <div style="font-size:0.95rem; font-weight:600; color:#1e293b;">
+                <div style="font-size:0.95rem; font-weight:600; color:#E5E9ED;">
                     t = {ps.t_stat:.2f} | p-value = {ps.p_value_t:.4e}
                 </div>
                 <div class="metric-sub">
-                    {'Statistically significant at 5% level' if ps.p_value_t < 0.05 else 'Not statistically significant at 5% level'}
+                    {'Statistically distinguishable from zero at 5% level' if ps.p_value_t < 0.05 else 'Not statistically distinguishable from zero at 5% level'}
                 </div>
             </div>
             """,
@@ -818,11 +867,11 @@ with tab_mc:
         """
         <div class="callout-box">
         <b>Quantitative Interpretation:</b><br>
-        Inventory-aware quoting (Policy B) acts as a dynamic risk dampener: by shading bids downward and asks upward
-        when long (and vice versa when short), Policy B actively attracts order flow on the inventory-reducing side.
-        This compresses inventory variance, reduces the probability of hitting the hard boundary Q_max, and dampens
-        terminal liquidation penalties. However, in return regimes where adverse selection is mild, Policy B may capture
-        slightly fewer total fills or narrower margins on liquidation trades.
+        Inventory-aware quoting (Policy B) dynamically adjusts reservation prices: by shading bids downward and asks upward
+        when long (and vice versa when short), Policy B attracts counterparty flow to trim inventory.
+        This reduces time-weighted inventory exposure, dampens the probability of reaching boundary <code>Q_max</code>,
+        and limits residual liquidation costs. However, in low-impact or calm regimes, shading quotes can sacrifice spread margin
+        or fill frequency on the unshaded side.
         </div>
         """,
         unsafe_allow_html=True,
@@ -838,7 +887,7 @@ with tab_experiments:
     exp_choice = st.radio(
         "Select Experiment",
         [
-            "Experiment A: Clustered Hawkes vs Matched-Mean Poisson Baseline",
+            "Experiment A: Clustered Hawkes vs Matched Finite-Horizon Poisson Baseline",
             "Experiment B: Inventory Control Ablation (Skew Strength Sweep)",
             "Experiment C: Adverse Selection & Volatility Stress Analysis",
         ],
@@ -847,12 +896,13 @@ with tab_experiments:
 
     if exp_choice.startswith("Experiment A"):
         st.markdown(
-            """
-            **Research Objective:** Isolate the pure effect of order clustering.
-            We compare the Hawkes process against an independent Poisson arrival process that has the **exact same
-            theoretical mean intensity per side** `mean_rate = mu / (1 - branching_ratio)`.
-            Any difference in market-maker tail risk and inventory dispersion is strictly attributable to autocorrelation
-            and self/cross-excitation rather than raw order volume.
+            f"""
+            **Research Objective:** Isolate the quantitative impact of order-flow clustering.
+            We compare the bivariate Hawkes process against an independent Poisson arrival process calibrated to the
+            **exact finite-horizon expected count** over `[0, 1]` with zero-history start:
+            `E[N(T)] = (mu/(1-eta))*T - (mu*eta/(1-eta))*(1 - exp(-gamma*T))/gamma`.
+            - Stationary Hawkes Intensity: **{h_preview.stationary_mean_rate_per_side:.1f}** / side
+            - Finite-Horizon Matched Poisson Rate: **{h_preview.finite_horizon_matched_rate_per_side(1.0):.1f}** / side
             """
         )
 
@@ -877,49 +927,68 @@ with tab_experiments:
         fig_p_vs_h = plot_poisson_vs_hawkes_comparison(h_res, p_res)
         st.plotly_chart(fig_p_vs_h, use_container_width=True)
 
-        col_ha1, col_ha2 = st.columns(2)
-        with col_ha1:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-label">Hawkes Process Outcomes (Clustered)</div>
-                    <ul style="font-size:0.82rem; color:#334155; margin:6px 0 0 16px; padding:0;">
-                        <li>Policy A Mean P&L: <b>${h_res.stats_a.mean_pnl:.2f}</b> (Std: ${h_res.stats_a.std_pnl:.2f})</li>
-                        <li>Policy B Mean P&L: <b>${h_res.stats_b.mean_pnl:.2f}</b> (Std: ${h_res.stats_b.std_pnl:.2f})</li>
-                        <li>Policy A Worst 5% CVaR: <b>${h_res.stats_a.cvar_5th:.2f}</b></li>
-                        <li>Policy B Worst 5% CVaR: <b>${h_res.stats_b.cvar_5th:.2f}</b></li>
-                        <li>Policy A Mean Inv Util: <b>{h_res.stats_a.mean_inventory_util:.1%}</b></li>
-                        <li>Policy B Mean Inv Util: <b>{h_res.stats_b.mean_inventory_util:.1%}</b></li>
-                    </ul>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with col_ha2:
-            st.markdown(
-                f"""
-                <div class="metric-card">
-                    <div class="metric-label">Poisson Baseline Outcomes (Memoryless)</div>
-                    <ul style="font-size:0.82rem; color:#334155; margin:6px 0 0 16px; padding:0;">
-                        <li>Policy A Mean P&L: <b>${p_res.stats_a.mean_pnl:.2f}</b> (Std: ${p_res.stats_a.std_pnl:.2f})</li>
-                        <li>Policy B Mean P&L: <b>${p_res.stats_b.mean_pnl:.2f}</b> (Std: ${p_res.stats_b.std_pnl:.2f})</li>
-                        <li>Policy A Worst 5% CVaR: <b>${p_res.stats_a.cvar_5th:.2f}</b></li>
-                        <li>Policy B Worst 5% CVaR: <b>${p_res.stats_b.cvar_5th:.2f}</b></li>
-                        <li>Policy A Mean Inv Util: <b>{p_res.stats_a.mean_inventory_util:.1%}</b></li>
-                        <li>Policy B Mean Inv Util: <b>{p_res.stats_b.mean_inventory_util:.1%}</b></li>
-                    </ul>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+        # Independent process comparison using two-sample bootstrap
+        proc_comp_a = compute_independent_process_comparison(h_res, p_res, policy_key="a", seed=int(sim_seed))
+        proc_comp_b = compute_independent_process_comparison(h_res, p_res, policy_key="b", seed=int(sim_seed) + 1)
+
+        st.markdown('<div class="section-header">Independent Process Comparison: Hawkes vs Poisson (Uncertainty Estimates)</div>', unsafe_allow_html=True)
+        st.markdown(
+            "Note: Hawkes and Poisson suites are generated from independent simulation paths. "
+            "Differences below are evaluated using independent two-sample bootstrap resampling (2,000 resamples), "
+            "recomputing nonlinear tail statistics in each bootstrap iteration."
+        )
+
+        comp_rows = []
+        for name, comp in [
+            ("Policy A - Mean Net P&L", proc_comp_a.mean_pnl),
+            ("Policy A - 5th Pct VaR", proc_comp_a.var_5th),
+            ("Policy A - Worst 5% CVaR", proc_comp_a.cvar_5th),
+            ("Policy A - Mean Event-Sampled MDD", proc_comp_a.mean_drawdown),
+            ("Policy A - Time-Avg Inventory", proc_comp_a.time_avg_inventory),
+            ("Policy B - Mean Net P&L", proc_comp_b.mean_pnl),
+            ("Policy B - 5th Pct VaR", proc_comp_b.var_5th),
+            ("Policy B - Worst 5% CVaR", proc_comp_b.cvar_5th),
+            ("Policy B - Mean Event-Sampled MDD", proc_comp_b.mean_drawdown),
+            ("Policy B - Time-Avg Inventory", proc_comp_b.time_avg_inventory),
+        ]:
+            comp_rows.append({
+                "Metric": name,
+                "Hawkes (Clustered)": f"{comp.hawkes_val:.2f}",
+                "Poisson (Matched Rate)": f"{comp.poisson_val:.2f}",
+                "Difference (Hawkes - Poisson)": f"{comp.diff_val:+.2f}",
+                "95% Bootstrap CI": f"[{comp.ci_lower:+.2f}, {comp.ci_upper:+.2f}]",
+                "Significant (p < 0.05)": "Yes" if comp.is_significant else "No",
+            })
+
+        st.dataframe(pd.DataFrame(comp_rows), hide_index=True, use_container_width=True)
+
+        # Computed dynamic interpretation
+        cvar_diff_a = proc_comp_a.cvar_5th
+        mdd_diff_a = proc_comp_a.mean_drawdown
+
+        if cvar_diff_a.is_significant and cvar_diff_a.diff_val < 0:
+            cvar_text = f"Hawkes clustering produced a statistically significant worsening in worst-5% CVaR for Policy A (difference: ${cvar_diff_a.diff_val:.2f}, 95% CI: [${cvar_diff_a.ci_lower:.2f}, ${cvar_diff_a.ci_upper:.2f}])."
+        elif cvar_diff_a.is_significant and cvar_diff_a.diff_val > 0:
+            cvar_text = f"Poisson produced a worse 5% CVaR for Policy A in this configuration (difference: ${cvar_diff_a.diff_val:.2f}, 95% CI: [${cvar_diff_a.ci_lower:.2f}, ${cvar_diff_a.ci_upper:.2f}])."
+        else:
+            cvar_text = f"The difference in worst-5% CVaR for Policy A between Hawkes and Poisson is not statistically distinguishable from zero at the 95% confidence level (difference: ${cvar_diff_a.diff_val:.2f}, 95% CI: [${cvar_diff_a.ci_lower:.2f}, ${cvar_diff_a.ci_upper:.2f}])."
+
+        if mdd_diff_a.is_significant and mdd_diff_a.diff_val > 0:
+            mdd_text = f"Mean event-sampled maximum drawdown was significantly larger under Hawkes clustering (difference: ${mdd_diff_a.diff_val:.2f}, 95% CI: [${mdd_diff_a.ci_lower:.2f}, ${mdd_diff_a.ci_upper:.2f}])."
+        elif mdd_diff_a.is_significant and mdd_diff_a.diff_val < 0:
+            mdd_text = f"Mean event-sampled maximum drawdown was significantly larger under Poisson arrivals (difference: ${mdd_diff_a.diff_val:.2f}, 95% CI: [${mdd_diff_a.ci_lower:.2f}, ${mdd_diff_a.ci_upper:.2f}])."
+        else:
+            mdd_text = f"Mean event-sampled maximum drawdown did not differ significantly between Hawkes and Poisson at the 95% confidence level (difference: ${mdd_diff_a.diff_val:.2f}, 95% CI: [${mdd_diff_a.ci_lower:.2f}, ${mdd_diff_a.ci_upper:.2f}])."
 
         st.markdown(
-            """
+            f"""
             <div class="callout-box">
-            <b>Clustering Insight:</b> Under Hawkes dynamics, consecutive orders arrive in micro-bursts. When an order
-            arrives on the buy side, self-excitation increases the immediate probability of subsequent buy orders.
-            Because market orders exert price impact, the dealer accumulates adverse one-sided inventory exactly during
-            directional runs, causing significantly heavier left-tail drawdowns under Hawkes than under memoryless Poisson arrivals.
+            <b>Computed Findings (Seed: {sim_seed}, N: {n_sessions}):</b><br>
+            <ul>
+                <li><b>Tail Risk (CVaR):</b> {cvar_text}</li>
+                <li><b>Drawdown Risk:</b> {mdd_text}</li>
+            </ul>
+            <i>Note: These findings reflect statistical uncertainty within the specified synthetic simulation configuration and do not constitute empirical claims about all real-world electronic markets.</i>
             </div>
             """,
             unsafe_allow_html=True,
@@ -929,9 +998,7 @@ with tab_experiments:
         st.markdown(
             """
             **Research Objective:** Quantify the trade-off in inventory skew sensitivity.
-            We sweep `inventory_skew_bps` from `0.0` (which collapses Policy B into Policy A) up to `4.0 bps/unit`.
-            Notice how increasing skew strength progressively trims inventory utilization and tail risk, but beyond an
-            optimal threshold, excessive skew reduces fill rates on quote edges.
+            We sweep `inventory_skew_bps` from `0.0` (where Policy B collapses into Policy A) up to `4.0 bps/unit`.
             """
         )
 
@@ -1046,6 +1113,20 @@ with tab_methodology:
         """
     )
     st.latex(r"\mathbb{E}[\lambda_{\text{buy}}] = \mathbb{E}[\lambda_{\text{sell}}] = \frac{\mu}{1 - \eta}")
+    st.markdown(
+        r"""
+        **Finite-Horizon Expected Count (Zero Initial Condition):**
+        Over a finite session horizon $T$ with zero event history $x_k(0) = 0$, the expected count per side is:
+        """
+    )
+    st.latex(
+        r"\mathbb{E}[N(T)] = \frac{\mu}{1 - \eta} T - \frac{\mu \eta}{1 - \eta} \frac{1 - e^{-\gamma T}}{\gamma}, \quad \gamma = \beta(1 - \eta)"
+    )
+    st.markdown(
+        r"""
+        The matched Poisson baseline uses constant arrival rate $\lambda_{\text{matched}} = \frac{\mathbb{E}[N(T)]}{T}$.
+        """
+    )
 
     st.markdown("#### 2. Synthetic Reference-Price Dynamics")
     st.markdown(
@@ -1163,7 +1244,7 @@ with tab_limitations:
 # Footer
 st.divider()
 st.markdown(
-    "<div style='font-size:0.75rem; color:#94a3b8; text-align:center;'>"
+    "<div style='font-size:0.75rem; color:#A6B0BB; text-align:center;'>"
     "OrderFlow Lab &copy; 2026 | Quantitative Finance Research Application | Runs fully offline with deterministic random seeds."
     "</div>",
     unsafe_allow_html=True,

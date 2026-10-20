@@ -40,24 +40,36 @@ Upon an accepted event at time $t_i$:
 - If a buy event occurs: $x_{\text{buy}}(t_i^+) = x_{\text{buy}}(t_i) + 1$, while $x_{\text{sell}}(t_i^+) = x_{\text{sell}}(t_i)$.
 - If a sell event occurs: $x_{\text{sell}}(t_i^+) = x_{\text{sell}}(t_i) + 1$, while $x_{\text{buy}}(t_i^+) = x_{\text{buy}}(t_i)$.
 
-#### Subcritical Stability Criterion
+#### Subcritical Stability Criterion & Finite-Horizon Arrival Expectation
 Parameters must satisfy $\mu > 0$, $\beta > 0$, $\alpha_{\text{self}} \ge 0$, $\alpha_{\text{cross}} \ge 0$, and the branching ratio:
 
 $$\eta = \frac{\alpha_{\text{self}} + \alpha_{\text{cross}}}{\beta} < 1.0$$
 
-Parameter combinations with $\eta \ge 1.0$ represent explosive, supercritical processes and are rejected with informative error messages. Under subcriticality, the stationary theoretical mean event intensity per side is:
+Parameter combinations with $\eta \ge 1.0$ represent explosive, supercritical processes and are rejected with informative error messages. Under subcriticality, the asymptotic stationary theoretical mean event intensity per side is:
 
-$$\mathbb{E}[\lambda_{\text{buy}}] = \mathbb{E}[\lambda_{\text{sell}}] = \frac{\mu}{1 - \eta}$$
+$$\lambda_{\infty} = \lim_{t \to \infty} \mathbb{E}[\lambda_{\text{buy}}(t)] = \lim_{t \to \infty} \mathbb{E}[\lambda_{\text{sell}}(t)] = \frac{\mu}{1 - \eta}$$
 
-#### Continuous-Time Simulation: Ogata's Thinning
-Events are simulated exactly in continuous time $t \in [0, 1]$ via Ogata's modified thinning algorithm. Because intensities decay monotonically between jumps, the total intensity immediately after an event $\lambda_{\text{tot}}(t_i^+) = \lambda_{\text{buy}}(t_i^+) + \lambda_{\text{sell}}(t_i^+)$ forms a piecewise upper bound $\bar{\lambda}$ on the subsequent inter-arrival interval.
+However, simulations initialize with zero event-history states ($x_{\text{buy}}(0) = 0, x_{\text{sell}}(0) = 0$). Over a finite session horizon $t \in [0, T]$, the expected intensity starts at the baseline $\mu$ and rises asymptotically toward $\lambda_\infty$ as self- and cross-excitation accumulate. 
+
+Let $a = \alpha_{\text{self}} + \alpha_{\text{cross}}$, $\eta = a / \beta$, and $\gamma = \beta - a = \beta(1 - \eta) > 0$. The exact finite-horizon expected count per side over $[0, T]$ is given by:
+
+$$\mathbb{E}[N(T)] = \frac{\mu}{1 - \eta} T - \frac{\mu \eta}{1 - \eta} \left(\frac{1 - e^{-\gamma T}}{\gamma}\right)$$
+
+When $\eta = 0$ (zero excitation), the process reduces directly to a homogeneous Poisson process with $\mathbb{E}[N(T)] = \mu T$.
 
 #### Matched-Mean Poisson Comparator
-To isolate the effect of clustering rather than giving the Hawkes model more orders, a matched Poisson benchmark is generated with constant arrival intensity per side:
+To isolate the economic impact of order-flow clustering without distorting aggregate order volume, the Poisson benchmark must match the Hawkes process's actual finite-session expected count, not its asymptotic stationary rate.
 
-$$\lambda_{\text{Poisson}} = \frac{\mu}{1 - \eta}$$
+OrderFlow Lab sets the Poisson baseline's constant arrival rate per side to:
 
-Both processes have identical expected order counts over $[0, 1]$.
+$$\lambda_{\text{Poisson, matched}} = \frac{\mathbb{E}[N(T)]}{T} = \frac{\mu}{1 - \eta} - \frac{\mu \eta}{1 - \eta} \left(\frac{1 - e^{-\gamma T}}{\gamma T}\right)$$
+
+For typical parameters ($\mu=20, \alpha_{\text{self}}=5, \alpha_{\text{cross}}=5, \beta=20, T=1.0$), $\lambda_\infty = 40.0$, but $\lambda_{\text{matched}} = 38.0$ events/side. Using the stationary rate over a finite horizon would artificially inflate the Poisson comparator by ~5% more volume, confounding arrival clustering with volume bias.
+
+Both the stationary intensity $\lambda_\infty$ and the finite-horizon matched rate $\lambda_{\text{matched}}$ are explicitly computed, distinguished, and displayed in the interface and model outputs.
+
+#### Continuous-Time Simulation: Ogata's Thinning
+Events are simulated exactly in continuous time $t \in [0, T]$ via Ogata's modified thinning algorithm. Because intensities decay monotonically between jumps, the total intensity immediately after an event $\lambda_{\text{tot}}(t_i^+) = \lambda_{\text{buy}}(t_i^+) + \lambda_{\text{sell}}(t_i^+)$ forms a piecewise upper bound $\bar{\lambda}$ on the subsequent inter-arrival interval.
 
 ---
 
@@ -101,13 +113,13 @@ where $d_{\text{bps}}$ is the quoted distance from current mid-price in basis po
 - Both distances remain strictly positive ($\ge 0.2 \delta_{\text{base}} > 0$).
 - Enforces the identical hard inventory boundary $q \in [-Q_{\max}, +Q_{\max}]$.
 
----
+### 2.4 Accounting, Liquidation, & Formal Metric Definitions
 
-### 2.4 Accounting & Conservative Terminal Liquidation
-
+#### Intra-Session Cash & Inventory Updates
 Intra-session trades update cash by execution price minus transaction fees ($P \times \text{fee\_bps} / 10^4$). Inventory is marked to market at the post-impact mid-price.
 
-At session end ($t = 1.0$), residual inventory $q_T \ne 0$ is liquidated by crossing the base half-spread and paying liquidation fees:
+#### Conservative Terminal Liquidation
+At session end ($t = T$), residual inventory $q_T \ne 0$ is liquidated by crossing the base half-spread and paying liquidation fees:
 - If $q_T > 0$ (long): sell $q_T$ at $P_{\text{liq}} = S_T \exp(-\delta_{\text{base}} / 10^4)$.
 - If $q_T < 0$ (short): buy back $|q_T|$ at $P_{\text{liq}} = S_T \exp(+\delta_{\text{base}} / 10^4)$.
 - Liquidation fee: $|q_T| \times P_{\text{liq}} \times (\text{fee\_bps} / 10^4)$.
@@ -117,33 +129,55 @@ $$\text{Net Terminal P\&L} = \text{MTM Terminal Equity} - \text{Spread-Crossing 
 
 Because the liquidation penalty is strictly non-negative, **net terminal P&L never exceeds marked-to-mid equity**, preventing over-reporting of unliquidated positions.
 
+#### Rigorous Exposure & Risk Metrics
+1. **Time-Average Absolute Inventory (`time_average_abs_inventory`):**
+   Measures true duration-weighted inventory exposure throughout the session:
+   $$\bar{q}_{\text{time}} = \frac{1}{T} \int_0^T |q(t)| \, dt = \frac{1}{T} \sum_{i=1}^M |q(t_{i-1})| \, \Delta t_i$$
+   where $\Delta t_i = t_i - t_{i-1}$ is the exact holding duration between consecutive events.
+2. **Session Maximum Absolute Inventory (`mean_session_max_abs_inventory`):**
+   Reports the expected peak inventory reached within a session: $\mathbb{E}[\max_{t \in [0, T]} |q(t)|]$. (Note: $\bar{q}_{\text{time}} \le \max |q|$ holds identically on every path).
+3. **Event-Sampled Maximum Drawdown (`event_sampled_max_drawdown`):**
+   Calculated strictly at order arrival timestamps and the terminal liquidation timestamp:
+   $$\text{MDD}_{\text{event}} = \max_{k \le m} \left( \max_{j \le k} \text{Equity}(t_j) - \text{Equity}(t_k) \right)$$
+   This is explicitly an *event-time-sampled* estimate rather than a continuous-time supremum.
+4. **Log Price Return (`log_price_return_bps`):**
+   The continuously compounded return of the reference mid-price in basis points:
+   $$\text{log\_price\_return\_bps} = 10\,000 \times \ln\left(\frac{S_T}{S_0}\right)$$
+
 ---
 
-## 3. Experimental Architecture & Reproducibility
+## 3. Experimental Architecture & Inferential Methodology
 
-### Common Random Numbers (CRN)
-For every Monte Carlo replicate:
+### Paired Policy Comparison (Policy A vs. Policy B) & Common Random Numbers
+For paired policy comparisons on the same process:
 1. One shared order-flow arrival path is simulated.
 2. One shared reference-price path with Brownian noise is computed.
 3. For each order arrival $i$, a uniform fill draw $U_i \sim \mathcal{U}(0, 1)$ is sampled.
 4. Both Policy A and Policy B evaluate fill conditions against the exact same $U_i$.
 
-This eliminates path variance from the paired difference $\Delta_i = \text{P\&L}_{B, i} - \text{P\&L}_{A, i}$.
+**Methodological Note on CRN:** Common Random Numbers **reduce the variance** of the paired difference $\Delta_i = \text{P\&L}_{B, i} - \text{P\&L}_{A, i}$ by inducing positive correlation between outcomes on identical market paths. CRN does *not* eliminate the path variance of the underlying market price or the individual policy P&L distributions.
 
-### Statistical Inference
-- **Bootstrap 95% Confidence Intervals:** Computed over 2,000 resamples across matched replicates.
-- **Paired Hypothesis Tests:** Two-sided Student's paired $t$-test and Wilcoxon signed-rank test.
-- **Tail-Risk Statistics:** 5th percentile Value-at-Risk ($\text{VaR}_{0.05}$) and Conditional Value-at-Risk ($\text{CVaR}_{0.05}$ / Expected Shortfall).
+### Independent Process Comparison (Hawkes vs. Poisson)
+Because Hawkes and Poisson order flows are generated by fundamentally distinct point processes, Hawkes and Poisson simulation suites **cannot and do not use paired testing**. 
+
+Experiment A conducts an **independent two-sample comparison**:
+- Monte Carlo sets are sampled independently from the respective processes.
+- Differences $\theta_{\text{Hawkes}} - \theta_{\text{Poisson}}$ are evaluated using independent two-sample non-parametric bootstrap resampling ($B = 2,000$ resamples).
+- **Nonlinear Tail Resampling:** For nonlinear functionals such as 5th percentile Value-at-Risk ($\text{VaR}_{0.05}$) and Conditional Value-at-Risk ($\text{CVaR}_{0.05}$ / Expected Shortfall), the quantile and tail mean are recomputed *inside each bootstrap resample*, guaranteeing statistically valid confidence intervals.
+- Significance is inferred only if zero lies outside the 95% bootstrap confidence interval.
 
 ---
 
 ## 4. Empirical Findings & Policy Interpretation
 
-Using the baseline parameters ($\mu=30, \alpha_{\text{self}}=8, \alpha_{\text{cross}}=4, \beta=20, \sigma=0.05, \text{impact}=2.0\text{ bps}, \delta=5.0\text{ bps}, Q_{\max}=10, c=1.0\text{ bps/unit}, \text{fee}=0.5\text{ bps}$):
+All empirical interpretations in OrderFlow Lab are generated dynamically from computed simulation metrics rather than hardcoded assumptions:
 
-1. **Clustering Exacerbates Inventory Risk:** Under Hawkes order flow, one-sided cascades push Policy A to its boundary $Q_{\max}$ frequently (utilization $\approx 55\%-70\%$), causing severe left-tail outcomes ($\text{CVaR}_{0.05} \approx -\$5.00$ to $-\$12.00$). Under matched-mean Poisson arrivals, inventory utilization drops significantly ($\approx 35\%-45\%$) with milder drawdowns.
-2. **Inventory Skew Tames Tail Risk:** Policy B consistently achieves higher win rates ($\approx 60\%-75\%$) across paired paths, shrinking maximum inventory utilization by $25\%-40\%$ and improving 5% CVaR.
-3. **The Skew Trade-Off:** The benefit of inventory control is not unconditionally positive. In regimes with zero price impact ($\text{impact\_bps} = 0$) and low volatility, Policy A captures more spread because Policy B unnecessarily shades quotes and narrows its execution margin. Inventory control is specifically an **adverse-selection risk mitigation strategy**, not a free lunch.
+1. **Clustering vs. Poisson Benchmark:**
+   Holding finite-horizon expected arrival volume identical ($\lambda_{\text{matched}} = \mathbb{E}[N(T)]/T$), the clustering of Hawkes arrivals alters the variance of dealer order arrivals. Whether this leads to statistically significant worsening of drawdowns or CVaR depends on the self-excitation ($\alpha_{\text{self}}$) versus cross-excitation ($\alpha_{\text{cross}}$) balance. In high self-excitation regimes, runs of one-sided orders increase time-average inventory exposure and tail losses. If cross-excitation dominates, orders self-equilibrate and tail metrics may remain statistically indistinguishable from Poisson arrivals.
+2. **Inventory Skew as Risk Mitigation:**
+   Across paired Monte Carlo runs, Policy B's inventory-dependent quoting dampens extreme inventory build-up. The reduction in time-average inventory ($\bar{q}_{\text{time}}$) and peak inventory is supported by paired $t$-tests and Wilcoxon signed-rank tests when adverse-selection price impact is non-zero.
+3. **The Adverse-Selection Trade-Off:**
+   In regimes where price impact is absent ($\text{impact\_bps} = 0$), inventory skewing sacrifices spread capture without mitigating adverse selection. The application's sensitivity sweep quantitatively demonstrates that inventory awareness is an adverse-selection defense mechanism rather than an unconditional spread maximizer.
 
 ---
 
@@ -166,8 +200,8 @@ The central hypothesis—that *inventory-aware quoting provides superior risk-ad
 ### Setup
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/orderflow-lab.git
-cd "P1_OrderFlow Lab"
+git clone https://github.com/NikHub-2k24/OrderFlow-Lab.git
+cd OrderFlow-Lab   # or cd "P1_OrderFlow Lab" depending on folder name
 
 # Install dependencies
 pip install -r requirements.txt
@@ -177,7 +211,7 @@ pip install -r requirements.txt
 ```bash
 pytest
 ```
-*Expected output: 31 passed in ~3.5s.*
+*Expected output: 41 passed in ~3.8s.*
 
 ### Launching the Streamlit Research Laboratory
 ```bash
@@ -190,28 +224,28 @@ Open `http://localhost:8501` in your browser.
 ## 7. Project Architecture
 
 ```
-P1_OrderFlow Lab/
+OrderFlow Lab/
 ├── .streamlit/
-│   └── config.toml          # Custom institutional theme (navy/slate/neutral)
+│   └── config.toml          # Custom dark institutional theme (#111418 background, #191F26 surface, #70AFA7 accent)
 ├── src/
 │   ├── __init__.py
-│   ├── config.py            # Dataclasses, validation rules, Hawkes stability conditions
-│   ├── hawkes.py            # Continuous-time Ogata thinning & matched Poisson engine
-│   ├── price_process.py     # Brownian diffusion & permanent signed order impact
+│   ├── config.py            # Dataclasses, validation rules, finite-horizon expected count & matched rate
+│   ├── hawkes.py            # Continuous-time Ogata thinning & finite-horizon matched Poisson engine
+│   ├── price_process.py     # Brownian diffusion, permanent signed order impact & log price return
 │   ├── policy.py            # Symmetric (Policy A) & Inventory-Aware (Policy B) policies
-│   ├── simulation.py        # Single-session and paired path execution engine
+│   ├── simulation.py        # Single-session and paired path execution, exact time-average inventory integral
 │   ├── accounting.py        # Cash, inventory, MTM equity, fees, and liquidation penalties
-│   ├── experiments.py       # Monte Carlo runner, bootstrap CIs, hypothesis tests, sweeps
-│   └── visualization.py     # Cohesive Plotly institutional charts and subplots
+│   ├── experiments.py       # Monte Carlo runner, independent bootstrap comparison, hypothesis tests, sweeps
+│   └── visualization.py     # Cohesive Plotly dark institutional charts, distributions, and subplots
 ├── tests/
-│   ├── test_config.py       # Parameter validation and instability rejection
-│   ├── test_hawkes.py       # Intensity nonnegativity, decay, ordering, rate matches
-│   ├── test_price_process.py# Price positivity, Brownian scaling, impact direction
+│   ├── test_config.py       # Parameter validation, instability rejection, and finite-horizon rate tests
+│   ├── test_hawkes.py       # Intensity nonnegativity, decay, zero excitation, and MC convergence
+│   ├── test_price_process.py# Price positivity, Brownian scaling, impact direction, log return in bps
 │   ├── test_policy.py       # Spread symmetry, skew direction, clamping, boundaries
 │   ├── test_accounting.py   # Fee subtraction, inventory sign, liquidation penalty proof
-│   ├── test_simulation.py   # Hard inventory invariants, path parity, reproducibility
-│   └── test_experiments.py  # Monte Carlo convergence, bootstrap CIs, sweeps
-├── app.py                   # Streamlit research application
+│   ├── test_simulation.py   # Hard inventory invariants, time-avg inventory integral, event-sampled MDD
+│   └── test_experiments.py  # Monte Carlo convergence, independent two-sample bootstrap CIs, sweeps
+├── app.py                   # Streamlit research application with dark institutional UI
 ├── requirements.txt         # Pinned production dependencies
 ├── README.md                # Comprehensive research documentation
 └── .gitignore               # Clean git exclusions
