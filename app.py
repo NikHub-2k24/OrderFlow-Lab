@@ -34,7 +34,6 @@ from src.visualization import (
 # Page configuration
 st.set_page_config(
     page_title="OrderFlow Lab | Quantitative Microstructure Research",
-    page_icon="⚖️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
