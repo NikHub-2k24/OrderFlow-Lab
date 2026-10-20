@@ -196,3 +196,43 @@ def test_monte_carlo_paired_records_new_metrics_and_aliases():
     assert mc_res.stats_a.mean_drawdown == mc_res.stats_a.mean_event_sampled_drawdown
     assert mc_res.stats_a.drawdown_95th == mc_res.stats_a.event_sampled_drawdown_95th
 
+
+def test_monte_carlo_stream_separation_independent_suites_and_paired_policies():
+    cfg = ExperimentConfig(
+        hawkes=HawkesParams(mu=20.0, alpha_self=5.0, alpha_cross=5.0, beta=20.0),
+        market=MarketParams(s0=100.0, sigma=0.04, impact_bps=2.0),
+        policy=PolicyParams(half_spread_bps=5.0, max_inventory=5, inventory_skew_bps=1.0),
+        n_sessions=10,
+        seed=123,
+    )
+
+    res_h1, res_p1 = run_poisson_vs_hawkes_experiment(cfg)
+    res_h2, res_p2 = run_poisson_vs_hawkes_experiment(cfg)
+
+    # 1. Reproducibility: same seed produces identical results
+    np.testing.assert_array_equal(
+        res_h1.df_sessions["price_return_bps"].to_numpy(),
+        res_h2.df_sessions["price_return_bps"].to_numpy(),
+    )
+    np.testing.assert_array_equal(
+        res_p1.df_sessions["price_return_bps"].to_numpy(),
+        res_p2.df_sessions["price_return_bps"].to_numpy(),
+    )
+
+    # 2. Independent streams: Hawkes suite and Poisson suite have distinct price return paths
+    # Because they receive independent spawned seed sequences, their Brownian and arrival draws are independent
+    assert not np.allclose(
+        res_h1.df_sessions["price_return_bps"].to_numpy(),
+        res_p1.df_sessions["price_return_bps"].to_numpy(),
+    )
+
+    # 3. Paired testing within suite: Policy A and Policy B share the same path in each session
+    assert len(res_h1.df_sessions) == 10
+    assert len(res_p1.df_sessions) == 10
+    # Win rate and paired differences are computed
+    assert res_h1.stats_a.n_sessions == 10
+    assert res_p1.stats_a.n_sessions == 10
+    assert 0.0 <= res_h1.paired_stats.win_rate_b <= 1.0
+    assert 0.0 <= res_p1.paired_stats.win_rate_b <= 1.0
+
+

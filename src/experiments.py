@@ -417,8 +417,13 @@ def run_monte_carlo_paired(
     config: ExperimentConfig,
     use_poisson: bool = False,
     progress_callback: Optional[Callable[[int, int], None]] = None,
+    seed_sequence: Optional[np.random.SeedSequence] = None,
 ) -> MonteCarloResults:
     """Execute paired Monte Carlo simulation comparing Policy A and Policy B across paths.
+
+    Within each path/session, Common Random Numbers (CRN) are strictly maintained:
+    Policy A and Policy B observe the exact same order events, mid-price trajectory,
+    and fill random draws. Comparisons between Policy A and Policy B are strictly PAIRED.
 
     Parameters
     ----------
@@ -428,6 +433,8 @@ def run_monte_carlo_paired(
         If True, use matched Poisson order arrival process.
     progress_callback : callable, optional
         Callback invoked with (completed_sessions, total_sessions).
+    seed_sequence : np.random.SeedSequence, optional
+        Explicit SeedSequence for independent reproducible stream families.
 
     Returns
     -------
@@ -436,7 +443,7 @@ def run_monte_carlo_paired(
     """
     n_sessions = config.n_sessions
     seed = config.seed
-    ss = np.random.SeedSequence(seed)
+    ss = seed_sequence if seed_sequence is not None else np.random.SeedSequence(seed)
     child_seeds = ss.spawn(n_sessions)
 
     rows = []
@@ -544,7 +551,15 @@ def run_poisson_vs_hawkes_experiment(
     config: ExperimentConfig,
     progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> Tuple[MonteCarloResults, MonteCarloResults]:
-    """Execute matched-mean Poisson vs Hawkes experiment.
+    """Execute matched-mean Poisson vs Hawkes experiment with stream separation.
+
+    Methodological Stream Architecture:
+    - Independent Streams: The Hawkes simulation suite and Poisson simulation suite
+      are assigned independent random-stream families spawned from root SeedSequence(seed).
+      Process comparisons (Hawkes vs Poisson) are strictly INDEPENDENT two-sample comparisons.
+    - Paired Streams (CRN): Within each suite and on each session path, Policy A and Policy B
+      share the identical random stream (arrival events, price path, and execution draws).
+      Policy comparisons (Policy B vs Policy A) are strictly PAIRED.
 
     Returns
     -------
@@ -561,8 +576,15 @@ def run_poisson_vs_hawkes_experiment(
         if progress_callback:
             progress_callback(config.n_sessions + done, total)
 
-    hawkes_res = run_monte_carlo_paired(config, use_poisson=False, progress_callback=cb_hawkes)
-    poisson_res = run_monte_carlo_paired(config, use_poisson=True, progress_callback=cb_poisson)
+    root_ss = np.random.SeedSequence(config.seed)
+    hawkes_ss, poisson_ss = root_ss.spawn(2)
+
+    hawkes_res = run_monte_carlo_paired(
+        config, use_poisson=False, progress_callback=cb_hawkes, seed_sequence=hawkes_ss
+    )
+    poisson_res = run_monte_carlo_paired(
+        config, use_poisson=True, progress_callback=cb_poisson, seed_sequence=poisson_ss
+    )
 
     return hawkes_res, poisson_res
 

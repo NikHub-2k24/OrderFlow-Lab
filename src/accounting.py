@@ -43,8 +43,14 @@ class SessionMetrics:
     time_average_abs_inventory: float  # Time-weighted integral(abs(q(t)) dt) / T
     inventory_utilization: float  # max_abs_inventory / max_inventory
     event_sampled_max_drawdown: float  # Event-time-sampled peak-to-trough equity drawdown
-    max_drawdown: float           # Backward-compatible alias for event_sampled_max_drawdown
-    is_loss: bool                 # True if net_terminal_pnl < 0
+    max_drawdown: Optional[float] = None  # Backward-compatible alias for event_sampled_max_drawdown
+    is_loss: Optional[bool] = None  # True if net_terminal_pnl < 0
+
+    def __post_init__(self) -> None:
+        if self.max_drawdown is None:
+            self.max_drawdown = self.event_sampled_max_drawdown
+        if self.is_loss is None:
+            self.is_loss = bool(self.net_terminal_pnl < 0.0)
 
 
 def calculate_terminal_liquidation(
